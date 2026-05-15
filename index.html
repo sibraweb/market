@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIBRA MARKET</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root{
+      --bg:#0f1115; --panel:#171a21; --panel2:#20242d; --text:#f5f5f5; --muted:#a9b0bd; --red:#d71920; --red2:#8e1116; --ok:#16a34a; --warn:#f59e0b; --bad:#ef4444; --line:#303642;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(135deg,#0b0c10,#171a21);color:var(--text);font-family:Century Gothic,Arial,sans-serif}
+    header{padding:22px 28px;border-bottom:1px solid var(--line);background:#090a0d;display:flex;gap:18px;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+    .brand{display:flex;align-items:center;gap:14px}
+    .logo{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,var(--red),#444);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px;box-shadow:0 0 20px rgba(215,25,32,.35)}
+    h1{margin:0;font-size:24px;letter-spacing:.08em}.sub{color:var(--muted);font-size:12px;margin-top:3px}
+    main{padding:24px;max-width:1500px;margin:auto}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}.tab{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer}.tab.active{background:var(--red);border-color:var(--red)}
+    .section{display:none}.section.active{display:block}.grid{display:grid;grid-template-columns:380px 1fr;gap:18px}.card{background:rgba(23,26,33,.92);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 18px 45px rgba(0,0,0,.25)}
+    label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}textarea,input,select{width:100%;background:#0d0f14;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:11px;font-family:inherit}textarea{min-height:160px;resize:vertical}
+    button{background:var(--red);color:white;border:none;border-radius:12px;padding:11px 14px;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:var(--panel2);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:not-allowed}
+    .mini{font-size:12px;color:var(--muted);line-height:1.45}.status{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.pill{padding:7px 10px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);font-size:12px}.ok{color:#86efac}.warn{color:#fcd34d}.bad{color:#fca5a5}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:9px;text-align:left;white-space:nowrap}th{background:#11141b;position:sticky;top:0;z-index:1;color:#e6e6e6}tbody tr:hover{background:#20242d}.tablewrap{overflow:auto;max-height:620px;border:1px solid var(--line);border-radius:14px}
+    .log{background:#090a0d;border:1px solid var(--line);border-radius:14px;padding:12px;height:220px;overflow:auto;font-family:Consolas,monospace;font-size:12px;color:#d4d4d4}.log div{margin-bottom:5px}.pos{color:#86efac}.neg{color:#fca5a5}.neutral{color:#d1d5db}
+    .contact{position:fixed;right:18px;top:42%;display:flex;flex-direction:column;gap:10px;z-index:20}.contact a{text-decoration:none;color:white;background:var(--red);padding:10px 12px;border-radius:999px;font-weight:800;box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:12px}.contact a.mail{background:#333}.contact a.ig{background:#555}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}.contact{position:static;flex-direction:row;justify-content:center;margin:12px}.tablewrap{max-height:420px}}
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand"><div class="logo">SM</div><div><h1>SIBRA MARKET</h1><div class="sub">Panel de señales, drawdown y gestión de órdenes sugeridas</div></div></div>
+  <div class="mini">MVP local · precios e históricos online · exportación CSV/Excel</div>
+</header>
+<div class="contact">
+  <a href="https://wa.me/5491166582523?text=Hola!%20Quisiera%20saber%20mas%20sobre%20inversiones." target="_blank">WhatsApp</a>
+  <a class="mail" href="mailto:info@sibratech.com.ar?subject=Consulta%20sobre%20inversiones&body=Hola!%20Quisiera%20saber%20mas%20sobre%20inversiones.">Email</a>
+  <a class="ig" href="https://instagram.com/finanzasenojotas" target="_blank">Instagram</a>
+</div>
+<main>
+  <div class="tabs">
+    <button class="tab active" data-tab="carga">Carga</button>
+    <button class="tab" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="historicos">Históricos</button>
+    <button class="tab" data-tab="senales">Señales</button>
+    <button class="tab" data-tab="clientes">Clientes</button>
+    <button class="tab" data-tab="ordenes">Órdenes</button>
+  </div>
+
+  <section id="carga" class="section active">
+    <div class="grid">
+      <div class="card">
+        <h2>Cargar activos</h2>
+        <label>Tickers, uno por línea o separados por coma</label>
+        <textarea id="tickers">YPFD
+PAMP
+GGAL
+SUPV
+AL30
+GD35
+AAPL
+MSFT</textarea>
+        <label>Tipo por defecto para buscar histórico</label>
+        <select id="defaultType">
+          <option value="auto">Automático</option>
+          <option value="stocks">Acciones argentinas</option>
+          <option value="cedears">CEDEARs</option>
+          <option value="bonds">Bonos argentinos</option>
+        </select>
+        <button id="btnLoad">Cargar datos</button>
+        <button class="secondary" id="btnClear">Limpiar</button>
+        <button class="secondary" id="btnExportHist">Exportar históricos</button>
+        <p class="mini">La app intenta buscar cada ticker en acciones, CEDEARs y bonos. Si no encuentra histórico, lo informa en el log. La marca visible queda como SIBRA MARKET.</p>
+      </div>
+      <div class="card">
+        <h2>Estado de carga</h2>
+        <div class="status">
+          <div class="pill">Activos: <b id="stAssets">0</b></div>
+          <div class="pill">Con histórico: <b id="stOk">0</b></div>
+          <div class="pill">Errores: <b id="stErr">0</b></div>
+          <div class="pill">Registros históricos: <b id="stRows">0</b></div>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="dashboard" class="section">
+    <div class="card"><h2>Dashboard de drawdown y medias</h2><div class="tablewrap"><table id="dashTable"></table></div></div>
+  </section>
+  <section id="historicos" class="section">
+    <div class="card"><h2>Base histórica cargada</h2><p class="mini">Muestra todos los precios históricos recibidos por activo.</p><div class="tablewrap"><table id="histTable"></table></div></div>
+  </section>
+  <section id="senales" class="section">
+    <div class="card"><h2>Take Profit / Stop Loss</h2><p class="mini">Cargá niveles manuales. Luego presioná recalcular señales.</p><button id="btnSignalRows">Crear filas de señales</button><button class="secondary" id="btnRecalcSignals">Recalcular señales</button><div class="tablewrap"><table id="signalTable"></table></div></div>
+  </section>
+  <section id="clientes" class="section">
+    <div class="card"><h2>Tenencias de clientes</h2><p class="mini">Pegá CSV: Cliente,ALyC,Comitente,Ticker,Cantidad</p><textarea id="clientCsv">Cliente,ALyC,Comitente,Ticker,Cantidad
+Cliente A,IEB,1001,YPFD,50
+Cliente B,ADCAP,2002,GGAL,100
+Cliente C,IEB,1003,AL30,1000</textarea><button id="btnLoadClients">Cargar clientes</button><div class="tablewrap"><table id="clientTable"></table></div></div>
+  </section>
+  <section id="ordenes" class="section">
+    <div class="card"><h2>Órdenes sugeridas</h2><button id="btnOrders">Generar órdenes desde señales activas</button><button class="secondary" id="btnExportOrders">Exportar órdenes</button><div class="tablewrap"><table id="ordersTable"></table></div></div>
+  </section>
+</main>
+<script>
+const API_ROOT = 'https://data912.com'; // no se muestra al usuario
+let assets=[], historyByTicker={}, summary=[], signals=[], clients=[], orders=[];
+const $=id=>document.getElementById(id);
+function log(msg, cls=''){ const d=document.createElement('div'); d.className=cls; d.textContent=new Date().toLocaleTimeString()+' · '+msg; $('log').prepend(d); }
+function parseTickers(){ return [...new Set($('tickers').value.split(/[\n,;\t ]+/).map(x=>x.trim().toUpperCase()).filter(Boolean))]; }
+function pct(x){ return Number.isFinite(x)? (x*100).toFixed(2)+'%' : '-'; }
+function num(x){ return Number.isFinite(x)? x.toLocaleString('es-AR',{maximumFractionDigits:2}) : '-'; }
+function dateVal(d){ const t=new Date(d).getTime(); return Number.isFinite(t)?t:0; }
+function normRows(raw,ticker,type){
+  let arr = Array.isArray(raw)? raw : (raw?.data || raw?.results || raw?.items || raw?.prices || []);
+  if(!Array.isArray(arr)) arr=[];
+  return arr.map(r=>{
+    const date = r.date || r.fecha || r.datetime || r.timestamp || r.time || r.Date;
+    const close = Number(r.close ?? r.c ?? r.ultimoPrecio ?? r.price ?? r.last ?? r.valor ?? r.Close ?? r.adjClose);
+    const open = Number(r.open ?? r.o ?? r.Open);
+    const high = Number(r.high ?? r.h ?? r.High);
+    const low = Number(r.low ?? r.l ?? r.Low);
+    const volume = Number(r.volume ?? r.volumen ?? r.Volume);
+    return {ticker,type,date,open,high,low,close,volume};
+  }).filter(r=>r.date && Number.isFinite(r.close)).sort((a,b)=>dateVal(a.date)-dateVal(b.date));
+}
+async function fetchJson(url){ const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status); return await r.json(); }
+async function fetchHistorical(ticker){
+  const def=$('defaultType').value;
+  const types = def==='auto' ? ['stocks','cedears','bonds'] : [def];
+  let lastErr='';
+  for(const type of types){
+    try{
+      const raw=await fetchJson(`${API_ROOT}/historical/${type}/${encodeURIComponent(ticker)}`);
+      const rows=normRows(raw,ticker,type);
+      if(rows.length){ return {ticker,type,rows}; }
+      lastErr=`sin filas válidas en ${type}`;
+    }catch(e){ lastErr=e.message; }
+  }
+  throw new Error(lastErr || 'sin histórico');
+}
+function sma(rows,n){ if(rows.length<n) return NaN; const s=rows.slice(-n).reduce((a,r)=>a+r.close,0); return s/n; }
+function maxSince(rows,years){
+  if(!rows.length) return NaN;
+  const lastT=dateVal(rows[rows.length-1].date); const from= lastT - years*365.25*24*3600*1000;
+  const win=rows.filter(r=>dateVal(r.date)>=from); if(!win.length) return NaN;
+  return Math.max(...win.map(r=>r.close));
+}
+function maxLastRows(rows,n){ const win=rows.slice(-n); if(!win.length) return NaN; return Math.max(...win.map(r=>r.close)); }
+function calcSummary(){
+  summary = Object.entries(historyByTicker).map(([ticker,obj])=>{
+    const rows=obj.rows; const last=rows[rows.length-1]; const price=last?.close;
+    const max52=maxLastRows(rows,252), max5=maxSince(rows,5), max10=maxSince(rows,10), maxAll=Math.max(...rows.map(r=>r.close));
+    const s20=sma(rows,20), s50=sma(rows,50), s200=sma(rows,200);
+    return {ticker,type:obj.type,fecha:last?.date,price,rows:rows.length,max52,dd52:price/max52-1,max5,dd5:price/max5-1,max10,dd10:price/max10-1,maxAll,ddAll:price/maxAll-1,s20,s50,s200,dist20:price/s20-1,dist50:price/s50-1,trend:Number.isFinite(s20)&&Number.isFinite(s50)?(s20>s50?'Alcista':'Bajista'):'Sin datos'};
+  });
+}
+function table(el, cols, data, editable=false){
+  let html='<thead><tr>'+cols.map(c=>`<th>${c.label}</th>`).join('')+'</tr></thead><tbody>';
+  html += data.map((r,i)=>'<tr>'+cols.map(c=>{
+    let v = typeof c.val==='function'?c.val(r,i):r[c.key];
+    if(c.edit) return `<td><input data-row="${i}" data-key="${c.key}" value="${v??''}" /></td>`;
+    return `<td class="${c.cls?c.cls(r):''}">${v??''}</td>`;
+  }).join('')+'</tr>').join('');
+  html+='</tbody>'; el.innerHTML=html;
+}
+function render(){
+  $('stAssets').textContent=assets.length; $('stOk').textContent=Object.keys(historyByTicker).length; $('stErr').textContent=Math.max(0,assets.length-Object.keys(historyByTicker).length); $('stRows').textContent=Object.values(historyByTicker).reduce((a,o)=>a+o.rows.length,0);
+  table($('dashTable'),[
+    {label:'Ticker',key:'ticker'},{label:'Tipo',key:'type'},{label:'Fecha',key:'fecha'},{label:'Precio',val:r=>num(r.price)},
+    {label:'DD 52 sem',val:r=>pct(r.dd52),cls:r=>r.dd52<0?'neg':'neutral'},{label:'Máx 52 sem',val:r=>num(r.max52)},
+    {label:'DD 5 años',val:r=>pct(r.dd5),cls:r=>r.dd5<0?'neg':'neutral'},{label:'Máx 5 años',val:r=>num(r.max5)},
+    {label:'DD 10 años',val:r=>pct(r.dd10),cls:r=>r.dd10<0?'neg':'neutral'},{label:'Máx 10 años',val:r=>num(r.max10)},
+    {label:'DD histórico',val:r=>pct(r.ddAll),cls:r=>r.ddAll<0?'neg':'neutral'},
+    {label:'SMA20',val:r=>num(r.s20)},{label:'SMA50',val:r=>num(r.s50)},{label:'SMA200',val:r=>num(r.s200)},
+    {label:'Dist SMA20',val:r=>pct(r.dist20),cls:r=>r.dist20>=0?'pos':'neg'},{label:'Dist SMA50',val:r=>pct(r.dist50),cls:r=>r.dist50>=0?'pos':'neg'},{label:'Tendencia',key:'trend'}
+  ], summary);
+  const hist=[]; Object.values(historyByTicker).forEach(o=>o.rows.forEach(r=>hist.push(r))); hist.sort((a,b)=>a.ticker.localeCompare(b.ticker)||dateVal(b.date)-dateVal(a.date));
+  table($('histTable'),[{label:'Ticker',key:'ticker'},{label:'Tipo',key:'type'},{label:'Fecha',key:'date'},{label:'Open',val:r=>num(r.open)},{label:'High',val:r=>num(r.high)},{label:'Low',val:r=>num(r.low)},{label:'Close',val:r=>num(r.close)},{label:'Volumen',val:r=>num(r.volume)}], hist.slice(0,5000));
+  renderSignals(); renderClients(); renderOrders();
+}
+async function loadAll(){
+  assets=parseTickers(); historyByTicker={}; summary=[]; signals=[]; orders=[]; render();
+  if(!assets.length){ log('No hay tickers cargados','bad'); return; }
+  log(`Iniciando carga de ${assets.length} activos...`);
+  $('btnLoad').disabled=true;
+  for(const t of assets){
+    try{ log(`Buscando histórico de ${t}...`); const res=await fetchHistorical(t); historyByTicker[t]=res; log(`${t}: OK ${res.rows.length} registros (${res.type})`,'pos'); }
+    catch(e){ log(`${t}: ERROR - ${e.message}`,'bad'); }
+    calcSummary(); render();
+  }
+  $('btnLoad').disabled=false; log('Carga finalizada. Revisar Dashboard e Históricos.','pos');
+}
+function renderSignals(){
+  table($('signalTable'),[
+    {label:'Ticker',key:'ticker'},{label:'Precio',val:r=>num(r.price)},{label:'Stop Loss',key:'stop',edit:true},{label:'Take Profit',key:'take',edit:true},{label:'Estado',key:'state'}
+  ], signals);
+  $('signalTable').querySelectorAll('input').forEach(inp=>inp.addEventListener('change',e=>{ const i=+e.target.dataset.row,k=e.target.dataset.key; signals[i][k]=Number(e.target.value); recalcSignals(); }));
+}
+function createSignals(){ signals=summary.map(r=>({ticker:r.ticker,price:r.price,stop:'',take:'',state:'Sin niveles'})); renderSignals(); }
+function recalcSignals(){ signals=signals.map(s=>{ const m=summary.find(r=>r.ticker===s.ticker); const p=m?.price; let st='Normal'; if(Number.isFinite(s.stop)&&p<=s.stop) st='Activó Stop Loss'; if(Number.isFinite(s.take)&&p>=s.take) st='Activó Take Profit'; return {...s,price:p,state:st}; }); renderSignals(); }
+function parseCsv(text){ const lines=text.trim().split(/\r?\n/).filter(Boolean); if(!lines.length)return[]; const headers=lines[0].split(',').map(h=>h.trim()); return lines.slice(1).map(l=>{const vals=l.split(','); let o={}; headers.forEach((h,i)=>o[h]=vals[i]?.trim()||''); return o;}); }
+function loadClients(){ clients=parseCsv($('clientCsv').value).map(r=>({cliente:r.Cliente||r.cliente,alyc:r['ALyC']||r.alyc,comitente:r.Comitente||r.comitente,ticker:(r.Ticker||r.ticker||'').toUpperCase(),cantidad:Number(r.Cantidad||r.cantidad||0)})); renderClients(); log(`Clientes cargados: ${clients.length}`,'pos'); }
+function renderClients(){ table($('clientTable'),[{label:'Cliente',key:'cliente'},{label:'ALyC',key:'alyc'},{label:'Comitente',key:'comitente'},{label:'Ticker',key:'ticker'},{label:'Cantidad',val:r=>num(r.cantidad)}], clients); }
+function genOrders(){ const active=signals.filter(s=>s.state&&s.state.startsWith('Activó')); orders=[]; active.forEach(s=>clients.filter(c=>c.ticker===s.ticker).forEach(c=>orders.push({fecha:new Date().toLocaleDateString('es-AR'),cliente:c.cliente,alyc:c.alyc,comitente:c.comitente,ticker:c.ticker,senal:s.state,cantidad:c.cantidad,porcentaje:'100%',operar:'Sí'}))); renderOrders(); log(`Órdenes sugeridas generadas: ${orders.length}`,'pos'); }
+function renderOrders(){ table($('ordersTable'),[{label:'Fecha',key:'fecha'},{label:'Cliente',key:'cliente'},{label:'ALyC',key:'alyc'},{label:'Comitente',key:'comitente'},{label:'Ticker',key:'ticker'},{label:'Señal',key:'senal'},{label:'Cantidad',val:r=>num(r.cantidad)},{label:'% Venta',key:'porcentaje'},{label:'Operar',key:'operar'}], orders); }
+function exportCsv(name, rows){ if(!rows.length){log('No hay datos para exportar','warn');return;} const headers=Object.keys(rows[0]); const csv=[headers.join(','),...rows.map(r=>headers.map(h=>`"${String(r[h]??'').replaceAll('"','""')}"`).join(','))].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.section').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $(b.dataset.tab).classList.add('active');}));
+$('btnLoad').onclick=loadAll; $('btnClear').onclick=()=>{assets=[];historyByTicker={};summary=[];signals=[];orders=[];$('log').innerHTML='';render();}; $('btnExportHist').onclick=()=>{const rows=[];Object.values(historyByTicker).forEach(o=>o.rows.forEach(r=>rows.push(r))); exportCsv('sibra_market_historicos.csv',rows);};
+$('btnSignalRows').onclick=createSignals; $('btnRecalcSignals').onclick=recalcSignals; $('btnLoadClients').onclick=loadClients; $('btnOrders').onclick=genOrders; $('btnExportOrders').onclick=()=>exportCsv('sibra_market_ordenes.csv',orders);
+log('App lista. Cargá tickers y presioná Cargar datos.'); render();
+</script>
+</body>
+</html>
