@@ -857,6 +857,16 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
             </div>
           </div>
 
+          <div class="source-card" id="sc-bcch">
+            <div class="sc-title">BCCH</div>
+            <div class="sc-file" id="sc-bcch-name">Carpeta configurada · 1 archivo/comitente</div>
+            <div class="sc-status idle" id="sc-bcch-status"><span>●</span> Sin cargar</div>
+            <div style="display:flex; gap:6px; margin-top:10px;">
+              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarBCCHDesdeCarpeta()">↓ Drive</button>
+              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickAlycFile('BCCH')">↑ Local</button>
+            </div>
+          </div>
+
           <div class="source-card" id="sc-clientes">
             <div class="sc-title">Clientes</div>
             <div class="sc-file" id="sc-clientes-name">Carpeta configurada</div>
@@ -1767,6 +1777,7 @@ async function cargarTodoDesdeDrive() {
   await Promise.all([
     cargarAlycDesdeCarpeta('ADCAP',      '1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2'),
     cargarAlycDesdeCarpeta('IEB',        '16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ'),
+    cargarBCCHDesdeCarpeta(),
     cargarFuenteDesdeCarpeta('clientes', '1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2'),
     cargarFuenteDesdeCarpeta('allocation','1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI'),
   ]);
@@ -1977,6 +1988,21 @@ async function processSourceFile(key, buf, name) {
   }
 }
 
+// Parsea números con formato monetario argentino: "$6.382.856,50" → 6382856.50
+// También maneja números normales, strings vacíos y valores de Excel
+function parseNum(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return val;          // XLSX ya lo parseó como number
+  const s = String(val)
+    .trim()
+    .replace(/\$/g, '')       // quitar signo $
+    .replace(/\s/g, '')       // quitar espacios
+    .replace(/\./g, '')       // quitar separadores de miles (punto en AR)
+    .replace(',', '.');       // coma decimal → punto
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+
 // Normaliza CC/comitente a string entero limpio (elimina decimales de Excel)
 function normCC(val) {
   if (val === null || val === undefined || val === '') return '';
@@ -2016,17 +2042,17 @@ function parseClientes(wb) {
       cliente:        String(r.cliente || r.Cliente || r.CLIENTE || '').trim(),
       cuit:           String(r.CUIT || r.cuit || '').trim(),
       alyc:           String(r.alyc || r.ALyC || r.ALYC || '').trim().toUpperCase(),
-      monto:          parseFloat(r.monto) || 0,
+      monto:          parseNum(r.monto),
       perfil:         String(r.perfil || r.Perfil || 'AGRESIVO').trim().toUpperCase(),
-      LP:             parseFloat(r.LP) || 0,
-      MP:             parseFloat(r.MP) || 0,
-      CP:             parseFloat(r.CP) || 0,
-      CASH:           parseFloat(r.CASH) || 0,
-      PALANCA:        parseFloat(r.PALANCA) || 1,
-      cartera:        parseFloat(r.Cartera) || 0,
-      total:          parseFloat(r.Total) || 0,
-      caucionPesos:   parseFloat(caucionP) || 0,
-      caucionDolares: parseFloat(caucionD) || 0,
+      LP:             parseNum(r.LP),
+      MP:             parseNum(r.MP),
+      CP:             parseNum(r.CP),
+      CASH:           parseNum(r.CASH),
+      PALANCA:        parseNum(r.PALANCA) || 1,
+      cartera:        parseNum(r.Cartera),
+      total:          parseNum(r.Total),
+      caucionPesos:   parseNum(caucionP),
+      caucionDolares: parseNum(caucionD),
     };
   }).filter(r => r.cc);
 
@@ -2204,6 +2230,155 @@ function parseGenericAlyc(buf, alycName) {
     }));
 }
 
+// ══════════════════════════════════════════
+//  BCCH — Carpeta Drive: 1 archivo XLS (HTML) por comitente
+// ══════════════════════════════════════════
+
+// Carga todos los archivos de la carpeta BCCH desde Drive
+async function cargarBCCHDesdeCarpeta() {
+  const FOLDER_ID = '1hKcPBrkb5B889roVRHh3Yx3jXcKPYr9R';
+  if (!S.token) { log('⚠ BCCH: conectá Drive primero', 'log-warn'); return; }
+
+  try {
+    setSourceStatus('bcch', 'loading', 'Buscando archivos...');
+    const data = await driveGet('files', {
+      q: `'${FOLDER_ID}' in parents and trashed = false and (name contains '.xls' or name contains '.xlsx')`,
+      orderBy: 'name',
+      pageSize: '200',
+      fields: 'files(id,name,modifiedTime)',
+    });
+
+    if (!data.files || data.files.length === 0) {
+      setSourceStatus('bcch', 'error', 'Carpeta vacía');
+      log('⚠ BCCH: no se encontraron archivos en la carpeta', 'log-warn');
+      return;
+    }
+
+    log(`☁ BCCH: ${data.files.length} archivos encontrados`, 'log-ok');
+    setSourceStatus('bcch', 'loading', `Descargando ${data.files.length} archivos...`);
+
+    // Quitar entradas BCCH previas
+    S.alycFiles = S.alycFiles.filter(f => f.alyc !== 'BCCH');
+
+    // Descargar todos en paralelo (lotes de 10 para no saturar)
+    const BATCH = 10;
+    let total = 0;
+    for (let i = 0; i < data.files.length; i += BATCH) {
+      const lote = data.files.slice(i, i + BATCH);
+      await Promise.all(lote.map(async file => {
+        try {
+          const buf  = await driveDownload(file.id);
+          // El comitente es el nombre del archivo sin extensión
+          const comitente = file.name.replace(/\.(xls|xlsx)$/i, '').trim();
+          S.alycFiles.push({ name: file.name, alyc: 'BCCH', comitente, data: buf });
+          total++;
+        } catch(e) {
+          log(`  ⚠ BCCH: error descargando ${file.name}: ${e.message}`, 'log-warn');
+        }
+      }));
+    }
+
+    updateAlycTags();
+    setSourceStatus('bcch', 'ok', `${total} comitentes cargados`);
+    const nameEl = $('sc-bcch-name');
+    if (nameEl) nameEl.textContent = `${total} archivos · 1 por comitente`;
+    log(`✅ BCCH: ${total} archivos cargados`, 'log-ok');
+
+  } catch(e) {
+    setSourceStatus('bcch', 'error', 'Error: ' + e.message);
+    log(`❌ BCCH: ${e.message}`, 'log-err');
+  }
+}
+
+// Parsea un archivo XLS de BCCH (formato HTML disfrazado de XLS)
+// comitente: número extraído del nombre del archivo
+function parseBCCHFile(buf, comitente) {
+  const posiciones = [];
+
+  try {
+    // Decodificar: pueden tener BOM UTF-8
+    const decoder = new TextDecoder('utf-8');
+    const html = decoder.decode(buf).replace(/^﻿/, '');
+
+    // Parsear HTML con DOMParser (disponible en browser)
+    const parser = new DOMParser();
+    const doc    = parser.parseFromString(html, 'text/html');
+    const tables = doc.querySelectorAll('table');
+
+    if (tables.length < 2) {
+      log(`⚠ BCCH ${comitente}: estructura inesperada (${tables.length} tablas)`, 'log-warn');
+      return posiciones;
+    }
+
+    // ── TABLA 1: Cash (cuenta corriente pesos y dólares) ──
+    // Fila que contiene "Cuenta corriente pesos"  → importe en última celda
+    // Fila que contiene "Cuenta corriente dólares" → "Cantidad USD:XXXX" en col 3
+    const tabla1 = tables[1];
+    if (tabla1) {
+      tabla1.querySelectorAll('tr').forEach(row => {
+        const cells = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
+        const label = (cells[2] || '').toLowerCase();
+
+        if (label.includes('cuenta corriente pesos')) {
+          // última celda con importe
+          const imp = parseNumBCCH(cells[cells.length - 1]);
+          if (imp !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_ARS', tenencia: imp });
+        }
+
+        if (label.includes('cuenta corriente dólares') || label.includes('cuenta corriente dolares')) {
+          // "Cantidad USD:XXXX" está en cells[3]
+          const cantCell = cells[3] || '';
+          const match = cantCell.match(/Cantidad USD[:\s]*([-\d.,]+)/i);
+          if (match) {
+            const qty = parseNumBCCH(match[1]);
+            if (qty !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_USD', tenencia: qty });
+          }
+        }
+      });
+    }
+
+    // ── TABLAS 2 y 3: Posiciones (pesos y dólares) ──
+    // Estructura: col 1 = Ticker, col 3 = Cantidad
+    // Primera fila = header (Ticker, Nombre, Cantidad, ...) → skip
+    // Última fila puede ser "Subtotal" → skip si ticker vacío o contiene "subtotal"
+    for (let t = 2; t <= 3 && t < tables.length; t++) {
+      const tabla = tables[t];
+      const rows  = [...tabla.querySelectorAll('tr')];
+
+      rows.slice(1).forEach(row => {  // saltar header
+        const cells  = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
+        const ticker = (cells[1] || '').trim().toUpperCase();
+        const cantRaw = cells[3] || '';
+
+        // Ignorar filas vacías, subtotales o encabezados repetidos
+        if (!ticker || /^(ticker|subtotal|total)/i.test(ticker)) return;
+
+        const tenencia = parseNumBCCH(cantRaw);
+        if (!isFinite(tenencia) || tenencia === 0) return;
+
+        posiciones.push({ alyc: 'BCCH', comitente, ticker, tenencia });
+      });
+    }
+
+  } catch(e) {
+    log(`❌ BCCH parseo ${comitente}: ${e.message}`, 'log-err');
+  }
+
+  return posiciones;
+}
+
+// Parsea números con formato argentino: "2.841,88" → 2841.88, "-36.542,57" → -36542.57
+function parseNumBCCH(val) {
+  if (!val && val !== 0) return 0;
+  const s = String(val).trim()
+    .replace(/\$/g, '')
+    .replace(/\s/g, '')
+    .replace(/\./g, '')   // separador de miles
+    .replace(',', '.');   // decimal
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+
 async function procesarArchivos() {
   $('processLog').innerHTML = '';
   log('🔄 Iniciando procesamiento...');
@@ -2216,8 +2391,9 @@ async function procesarArchivos() {
   for (const f of S.alycFiles) {
     try {
       let pos = [];
-      if (f.alyc === 'ADCAP') pos = parseADCAP(f.data);
-      else if (f.alyc === 'IEB') pos = parseIEB(f.data);
+      if (f.alyc === 'ADCAP')       pos = parseADCAP(f.data);
+      else if (f.alyc === 'IEB')    pos = parseIEB(f.data);
+      else if (f.alyc === 'BCCH')   pos = parseBCCHFile(f.data, f.comitente || f.name.replace(/\.xls$/i,''));
       else pos = parseGenericAlyc(f.data, f.alyc);
       S.posiciones.push(...pos);
       log(`  ✓ ${f.alyc} (${f.name}): ${pos.length} posiciones`, 'log-ok');
@@ -3060,7 +3236,7 @@ function init() {
 return {
   driveAuth, driveRevoke, driveBrowse, closeDrivePicker, confirmDrivePick,
   pickLocalFile, pickAlycFile,
-  cargarFuenteDesdeCarpeta, cargarAlycDesdeCarpeta, cargarTodoDesdeDrive,
+  cargarFuenteDesdeCarpeta, cargarAlycDesdeCarpeta, cargarTodoDesdeDrive, cargarBCCHDesdeCarpeta,
   removeAlyc, procesarArchivos, fetchPrices, fetchMEP,
   onAlycChange, onClienteChange, onRotAlycChange,
   filtrarCartera, limpiarFiltroCartera, sortCartera,
