@@ -2868,39 +2868,6 @@ function applyDashFilters() {
     if (el) el.className = `filter-select-inline${S.dashFilters[key] ? ' active-filter' : ''}`;
   });
   actualizarDashboard();
-  return; // lo siguiente ya no aplica
-
-  // Chips
-  const chips = $('dashActiveChips');
-  if (chips) {
-    const labels = { grupo:'Grupo', subgrupo:'Subgrupo', pais:'País', sector:'Sector', subtipo:'Subtipo' };
-    chips.innerHTML = Object.entries(S.dashFilters)
-      .filter(([,v]) => v)
-      .map(([k,v]) => `<div class="filter-chip">${labels[k]}: ${v} <span class="chip-rm" onclick="App.clearDashFilter('${k}')">✕</span></div>`)
-      .join('');
-  }
-
-  const comitente = S.dashCurrentComitente;
-  if (!comitente) return;
-
-  const pos = S.posiciones.filter(p =>
-    p.comitente === comitente && (!S.dashCurrentAlyc || p.alyc === S.dashCurrentAlyc)
-  );
-  const fullCartela = valuarCartera(pos);
-  const cli = findCliente(comitente);
-
-  // Filtrar cartera con filtros activos
-  const cartelaFiltrada = fullCartela.filter(p => {
-    const f = S.dashFilters;
-    return (!f.grupo    || p.alloc.grupo    === f.grupo)    &&
-           (!f.subgrupo || p.alloc.subgrupo === f.subgrupo) &&
-           (!f.pais     || p.alloc.pais     === f.pais)     &&
-           (!f.sector   || p.alloc.sector   === f.sector)   &&
-           (!f.subtipo  || p.alloc.subtipo  === f.subtipo);
-  });
-
-  renderClienteKPIs(cartelaFiltrada, cli);
-  renderClienteCharts(cartelaFiltrada);
 }
 
 function clearDashFilter(key) {
@@ -3371,11 +3338,17 @@ async function subirXLSXDrive(filename, data) {
 //  INIT
 // ══════════════════════════════════════════
 function init() {
-  initNav();
-  restoreToken();
-  initAC();
-  const cid = localStorage.getItem('sibra_client_id');
-  if (cid && $('cfgClientId')) $('cfgClientId').value = cid;
+  try {
+    initNav();
+    restoreToken();
+    initAC();
+    const cid = localStorage.getItem('sibra_client_id');
+    if (cid && $('cfgClientId')) $('cfgClientId').value = cid;
+    console.log('[SIBRA] App inicializado OK. driveAuth:', typeof driveAuth);
+  } catch(e) {
+    console.error('[SIBRA] Error en init():', e);
+    alert('Error al inicializar la app: ' + e.message + '\n\nAbrí la consola del browser (F12) para más detalles.');
+  }
 }
 
 return {
