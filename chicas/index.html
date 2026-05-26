@@ -1,1 +1,1021 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIBRA · Mesa de Ventas</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root {
+  --red: #E10600;
+  --red-dark: #B00500;
+  --red-light: #ff3330;
+  --bg: #0d0d0d;
+  --bg2: #141414;
+  --bg3: #1a1a1a;
+  --bg4: #222222;
+  --border: rgba(255,255,255,0.08);
+  --border2: rgba(255,255,255,0.14);
+  --text: #f0f0f0;
+  --text2: #a0a0a0;
+  --text3: #555;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --wa: #25d366;
+  --wa-bg: #0d2016;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Montserrat',sans-serif; font-size:13px; min-height:100vh; }
 
+/* ── HEADER ── */
+.app-header {
+  background:var(--bg2); border-bottom:2px solid var(--red);
+  padding:0 24px; height:52px;
+  display:flex; align-items:center; gap:16px;
+  position:sticky; top:0; z-index:100;
+}
+.logo { font-family:'Raleway',sans-serif; font-weight:700; font-size:18px; letter-spacing:2px; color:var(--red); }
+.logo span { color:var(--text); font-weight:300; }
+.header-sep { flex:1; }
+.drive-status { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); }
+.drive-dot { width:7px; height:7px; border-radius:50%; background:var(--text3); transition:background 0.3s; }
+.drive-dot.connected { background:var(--green); }
+.drive-dot.error { background:var(--red); }
+.btn-drive {
+  background:transparent; border:1px solid var(--border2); color:var(--text2);
+  padding:5px 14px; border-radius:4px; cursor:pointer;
+  font-family:'Montserrat',sans-serif; font-size:12px; font-weight:500;
+  transition:all 0.15s; display:flex; align-items:center; gap:6px;
+}
+.btn-drive:hover { border-color:var(--red); color:var(--red); }
+.btn-drive.connected { border-color:var(--green); color:var(--green); }
+
+/* ── MAIN ── */
+.main { max-width:1100px; margin:0 auto; padding:28px 20px 80px; }
+
+/* ── SECTION TITLE ── */
+.sec-title {
+  font-family:'Raleway',sans-serif; font-size:11px; font-weight:600;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--text3);
+  margin-bottom:12px;
+}
+
+/* ── DRIVE PANEL ── */
+.drive-panel {
+  background:var(--bg2); border:1px solid var(--border2); border-radius:10px;
+  padding:20px 24px; margin-bottom:24px;
+}
+.drive-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:14px; }
+.source-card {
+  background:var(--bg3); border:1px solid var(--border); border-radius:8px;
+  padding:14px; transition:border-color 0.2s;
+}
+.source-card.linked { border-color:rgba(34,197,94,.35); }
+.source-card.loading { border-color:rgba(245,158,11,.35); }
+.source-card.error { border-color:rgba(225,6,0,.35); }
+.sc-title { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); margin-bottom:6px; }
+.sc-file { font-size:11px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:6px; }
+.sc-status { font-size:11px; display:flex; align-items:center; gap:5px; }
+.sc-status.ok { color:var(--green); }
+.sc-status.warn { color:var(--amber); }
+.sc-status.err { color:var(--red); }
+.sc-status.idle { color:var(--text3); }
+.sc-btn { display:flex; gap:6px; margin-top:10px; }
+
+/* ── BUTTONS ── */
+.btn {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:8px 16px; border-radius:6px; cursor:pointer; border:none;
+  font-family:'Montserrat',sans-serif; font-size:12px; font-weight:600;
+  transition:all .15s; white-space:nowrap;
+}
+.btn-primary { background:var(--red); color:#fff; }
+.btn-primary:hover { background:var(--red-dark); }
+.btn-primary:disabled { background:var(--bg4); color:var(--text3); cursor:not-allowed; }
+.btn-secondary { background:transparent; border:1px solid var(--border2); color:var(--text2); }
+.btn-secondary:hover { border-color:var(--text2); color:var(--text); }
+.btn-sm { padding:5px 10px; font-size:11px; }
+
+/* ── FILTROS ── */
+.filter-panel {
+  background:var(--bg2); border:1px solid var(--border2); border-radius:10px;
+  padding:20px 24px; margin-bottom:24px;
+}
+.filter-row { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; }
+.fg { display:flex; flex-direction:column; gap:5px; }
+.fg label { font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text3); }
+select, input[type=text] {
+  background:var(--bg3); border:1px solid var(--border2); border-radius:6px;
+  color:var(--text); padding:8px 12px;
+  font-family:'Montserrat',sans-serif; font-size:12px; outline:none;
+  transition:border-color .15s;
+}
+select:focus, input[type=text]:focus { border-color:var(--red); }
+select { min-width:180px; cursor:pointer; }
+
+/* ── TICKER SEARCH ── */
+.ticker-search-wrap { position:relative; flex:1; min-width:200px; }
+.ticker-input { width:100%; }
+.ticker-drop {
+  display:none; position:absolute; top:calc(100% + 4px); left:0; right:0;
+  background:var(--bg3); border:1px solid var(--border2); border-radius:6px;
+  z-index:200; max-height:240px; overflow-y:auto;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);
+}
+.ticker-drop.open { display:block; }
+.ticker-item {
+  padding:9px 14px; cursor:pointer; font-size:12px;
+  border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;
+  transition:background .1s;
+}
+.ticker-item:last-child { border-bottom:none; }
+.ticker-item:hover { background:rgba(225,6,0,.08); }
+.ticker-item .ti-sym { font-weight:700; }
+.ticker-item .ti-count { font-size:10px; color:var(--text3); }
+
+/* ── ÓRDENES TABLE ── */
+.ordenes-panel {
+  background:var(--bg2); border:1px solid var(--border2); border-radius:10px;
+  overflow:hidden;
+}
+.ordenes-header {
+  padding:16px 24px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+}
+.ordenes-title { display:flex; align-items:center; gap:10px; }
+.tag-venta {
+  background:rgba(225,6,0,.12); border:1px solid rgba(225,6,0,.3);
+  color:var(--red); font-size:10px; font-weight:700;
+  letter-spacing:.1em; text-transform:uppercase;
+  padding:4px 10px; border-radius:4px;
+}
+.ticker-badge {
+  background:var(--bg3); border:1px solid var(--border2);
+  padding:4px 12px; border-radius:4px; font-weight:700; font-size:15px; letter-spacing:.03em;
+}
+
+/* PCT SELECTOR */
+.pct-selector { display:flex; gap:4px; align-items:center; }
+.pct-btn {
+  padding:5px 10px; border-radius:5px; cursor:pointer;
+  font-family:'Montserrat',sans-serif; font-size:11px; font-weight:600;
+  background:var(--bg3); border:1px solid var(--border); color:var(--text2);
+  transition:all .15s;
+}
+.pct-btn:hover { border-color:var(--red); color:var(--red); }
+.pct-btn.active { background:rgba(225,6,0,.15); border-color:var(--red); color:var(--red-light); }
+.pct-label { font-size:10px; color:var(--text3); margin-right:4px; text-transform:uppercase; letter-spacing:.05em; }
+
+/* TABLE */
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; }
+th {
+  background:var(--bg3); padding:9px 16px; text-align:left;
+  font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--text3); border-bottom:1px solid var(--border2); white-space:nowrap;
+}
+td { padding:0 16px; border-bottom:1px solid var(--border); font-size:12px; height:52px; white-space:nowrap; }
+tr:last-child td { border-bottom:none; }
+tr.row-sent td { opacity:.4; }
+.td-r { text-align:right; }
+.td-bold { font-weight:700; }
+
+/* CANTIDAD INPUT */
+.cant-wrap { display:flex; align-items:center; gap:6px; }
+.cant-input {
+  width:80px; text-align:right; padding:5px 8px;
+  background:var(--bg4); border:1px solid var(--border2); border-radius:5px;
+  color:var(--text); font-family:'Montserrat',sans-serif; font-size:12px; font-weight:600;
+  outline:none;
+}
+.cant-input:focus { border-color:var(--red); }
+.cant-sug { font-size:10px; color:var(--text3); }
+
+/* SEND BTN */
+.btn-enviar {
+  display:inline-flex; align-items:center; justify-content:center; gap:5px;
+  padding:8px 14px; border-radius:7px;
+  font-family:'Montserrat',sans-serif; font-size:12px; font-weight:700;
+  background:var(--wa-bg); color:var(--wa);
+  border:1px solid rgba(37,211,102,.2); text-decoration:none;
+  transition:all .15s; white-space:nowrap;
+}
+.btn-enviar:active { transform:scale(.95); }
+.badge-sent {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:8px 14px; border-radius:7px; font-size:11px; font-weight:600;
+  background:rgba(34,197,94,.08); color:var(--green); white-space:nowrap;
+}
+
+/* EMPTY */
+.empty-state { padding:56px 20px; text-align:center; color:var(--text3); }
+.empty-state .es-icon { font-size:38px; margin-bottom:12px; }
+.empty-state p { font-size:13px; color:var(--text2); margin-bottom:4px; }
+.empty-state small { font-size:11px; }
+
+/* LOG */
+.process-log {
+  background:var(--bg3); border:1px solid var(--border); border-radius:6px;
+  padding:10px 14px; font-size:11px; font-family:monospace; color:var(--text2);
+  max-height:120px; overflow-y:auto; margin-top:12px; line-height:1.8; display:none;
+}
+.log-ok { color:var(--green); }
+.log-warn { color:var(--amber); }
+.log-err { color:var(--red); }
+
+/* SPINNER */
+.inline-spinner {
+  display:inline-block; width:11px; height:11px;
+  border:2px solid var(--border2); border-top-color:var(--red);
+  border-radius:50%; animation:spin .7s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* TOAST */
+#toast {
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px);
+  background:#1f3829; color:var(--wa); border:1px solid rgba(37,211,102,.35);
+  padding:10px 22px; border-radius:30px; font-size:13px; font-weight:600;
+  z-index:300; white-space:nowrap; box-shadow:0 4px 24px rgba(0,0,0,.5);
+  transition:transform .3s cubic-bezier(.34,1.56,.64,1), opacity .3s;
+  opacity:0; pointer-events:none;
+}
+#toast.show { transform:translateX(-50%) translateY(0); opacity:1; }
+
+/* scrollbar */
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:var(--bg2); }
+::-webkit-scrollbar-thumb { background:var(--bg4); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo">SIBRA<span> · Mesa de Ventas</span></div>
+  <div class="header-sep"></div>
+  <div class="drive-status">
+    <div class="drive-dot" id="driveDot"></div>
+    <span id="driveLabel">Sin conectar</span>
+  </div>
+  <button class="btn-drive" id="btnDriveAuth" onclick="driveAuth()">
+    Conectar Drive
+  </button>
+</header>
+
+<main class="main">
+
+  <!-- DRIVE PANEL -->
+  <div class="drive-panel">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div class="sec-title" style="margin:0;">Fuentes de datos</div>
+      <button class="btn btn-primary" onclick="cargarTodo()">☁ Cargar todo desde Drive</button>
+    </div>
+    <div class="drive-grid">
+      <div class="source-card" id="sc-adcap">
+        <div class="sc-title">ADCAP</div>
+        <div class="sc-file" id="sc-adcap-name">Carpeta configurada</div>
+        <div class="sc-status idle" id="sc-adcap-status"><span>●</span> Sin cargar</div>
+        <div class="sc-btn">
+          <button class="btn btn-secondary btn-sm" onclick="cargarAlycDrive('ADCAP','1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2')">↓ Drive</button>
+          <button class="btn btn-secondary btn-sm" onclick="pickAlycLocal('ADCAP')">↑ Local</button>
+        </div>
+      </div>
+      <div class="source-card" id="sc-ieb">
+        <div class="sc-title">IEB</div>
+        <div class="sc-file" id="sc-ieb-name">Carpeta configurada</div>
+        <div class="sc-status idle" id="sc-ieb-status"><span>●</span> Sin cargar</div>
+        <div class="sc-btn">
+          <button class="btn btn-secondary btn-sm" onclick="cargarAlycDrive('IEB','16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ')">↓ Drive</button>
+          <button class="btn btn-secondary btn-sm" onclick="pickAlycLocal('IEB')">↑ Local</button>
+        </div>
+      </div>
+      <div class="source-card" id="sc-bcch">
+        <div class="sc-title">BCCH</div>
+        <div class="sc-file" id="sc-bcch-name">1 archivo/comitente</div>
+        <div class="sc-status idle" id="sc-bcch-status"><span>●</span> Sin cargar</div>
+        <div class="sc-btn">
+          <button class="btn btn-secondary btn-sm" onclick="cargarBCCH()">↓ Drive</button>
+        </div>
+      </div>
+      <div class="source-card" id="sc-clientes">
+        <div class="sc-title">Clientes</div>
+        <div class="sc-file" id="sc-clientes-name">Carpeta configurada</div>
+        <div class="sc-status idle" id="sc-clientes-status"><span>●</span> Sin cargar</div>
+        <div class="sc-btn">
+          <button class="btn btn-secondary btn-sm" onclick="cargarClientesDrive()">↓ Drive</button>
+          <button class="btn btn-secondary btn-sm" onclick="pickClientesLocal()">↑ Local</button>
+        </div>
+      </div>
+    </div>
+    <div id="processLog" class="process-log"></div>
+  </div>
+
+  <!-- FILTROS -->
+  <div class="filter-panel">
+    <div class="sec-title">Filtros</div>
+    <div class="filter-row">
+      <div class="fg" style="flex:1;min-width:200px;">
+        <label>Ticker a vender</label>
+        <div class="ticker-search-wrap">
+          <input type="text" class="ticker-input" id="tickerInput" placeholder="Buscar ticker..." autocomplete="off"
+            oninput="onTickerInput()" onfocus="openTickerDrop()" />
+          <div class="ticker-drop" id="tickerDrop"></div>
+        </div>
+      </div>
+      <div class="fg">
+        <label>ALyC</label>
+        <select id="filterAlyc" onchange="aplicarFiltros()">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>% a vender (global)</label>
+        <div class="pct-selector">
+          <span class="pct-label">Pct:</span>
+          <button class="pct-btn" onclick="setPct(0)">0%</button>
+          <button class="pct-btn" onclick="setPct(25)">25%</button>
+          <button class="pct-btn" onclick="setPct(50)">50%</button>
+          <button class="pct-btn" onclick="setPct(75)">75%</button>
+          <button class="pct-btn active" id="pct100" onclick="setPct(100)">100%</button>
+        </div>
+      </div>
+      <button class="btn btn-secondary" onclick="resetTodo()" style="align-self:flex-end;">✕ Limpiar</button>
+    </div>
+  </div>
+
+  <!-- ÓRDENES -->
+  <div class="ordenes-panel">
+    <div class="ordenes-header">
+      <div class="ordenes-title">
+        <span class="tag-venta">VENTA</span>
+        <span class="ticker-badge" id="tickerBadge">—</span>
+        <span style="font-size:12px;color:var(--text3);" id="ordenesCount"></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-secondary btn-sm" onclick="resetEnviados()">Resetear enviados</button>
+      </div>
+    </div>
+
+    <div id="ordenesBody">
+      <div class="empty-state">
+        <div class="es-icon">📋</div>
+        <p>Buscá un ticker para ver las órdenes</p>
+        <small>Cargá los datos de Drive y luego filtrá por ticker</small>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast">✓ Mensaje copiado — abrí WhatsApp y pegalo</div>
+<input type="file" id="fileInput" style="display:none;" accept=".xlsx,.xls" />
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════
+const WA_NUMBER   = '5493794406315';
+const CLIENT_ID   = '891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com';
+const SCOPES      = 'https://www.googleapis.com/auth/drive.readonly';
+const STORAGE_KEY = 'mesaventas_enviados_v2';
+
+// ═══════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════
+let token = null;
+let posiciones = [];   // { alyc, comitente, ticker, tenencia }
+let clientes   = [];   // { cc, cliente, ... }
+let tickerSeleccionado = null;
+let pctGlobal  = 100;
+let cantidades = {};   // comitente+alyc -> cantidad a vender (editable)
+
+// ═══════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════
+const $  = id => document.getElementById(id);
+const normCC = v => { if (!v && v !== 0) return ''; const n = parseFloat(String(v).trim()); return isFinite(n) ? String(Math.round(n)) : String(v).trim(); };
+
+function log(msg, cls='') {
+  const el = $('processLog');
+  el.style.display = 'block';
+  el.innerHTML += `<div class="${cls}">${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(key, status, msg) {
+  const el = $(`sc-${key}-status`);
+  const card = $(`sc-${key}`);
+  if (!el || !card) return;
+  card.className = 'source-card ' + (status==='ok'?'linked':status==='loading'?'loading':status==='error'?'error':'');
+  el.className = `sc-status ${status==='ok'?'ok':status==='error'?'err':status==='loading'?'warn':'idle'}`;
+  el.innerHTML = `<span>●</span> ${msg}`;
+}
+
+// ═══════════════════════════════════════════════════
+//  DRIVE AUTH
+// ═══════════════════════════════════════════════════
+function driveAuth() {
+  const redirectUri = location.href.split('?')[0].split('#')[0];
+  const state = Math.random().toString(36).slice(2);
+  sessionStorage.setItem('oauth_state', state);
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID, redirect_uri: redirectUri, response_type: 'token',
+    scope: SCOPES, state, prompt: 'select_account',
+  });
+  const popup = window.open('https://accounts.google.com/o/oauth2/v2/auth?' + params, 'googleOAuth', 'width=520,height=640,left=200,top=100');
+  const timer = setInterval(() => {
+    try {
+      const url = popup.location.href;
+      if (url.includes('access_token') || url.includes('error')) {
+        clearInterval(timer); popup.close();
+        const hash = new URLSearchParams(new URL(url).hash.slice(1));
+        if (hash.get('error')) { log('❌ Auth error: ' + hash.get('error'), 'log-err'); return; }
+        setToken(hash.get('access_token'), parseInt(hash.get('expires_in') || '3600'));
+      }
+    } catch(e) {}
+    if (popup.closed) clearInterval(timer);
+  }, 500);
+}
+
+function setToken(t, expiresIn) {
+  token = t;
+  localStorage.setItem('mesaventas_token', t);
+  localStorage.setItem('mesaventas_token_exp', new Date(Date.now() + expiresIn * 1000).toISOString());
+  updateDriveUI(true);
+  log('✅ Drive conectado', 'log-ok');
+}
+
+function restoreToken() {
+  const t = localStorage.getItem('mesaventas_token');
+  const exp = localStorage.getItem('mesaventas_token_exp');
+  if (t && exp && new Date(exp) > new Date()) { token = t; updateDriveUI(true); }
+}
+
+function updateDriveUI(ok) {
+  $('driveDot').className = 'drive-dot' + (ok ? ' connected' : '');
+  $('driveLabel').textContent = ok ? 'Drive conectado' : 'Sin conectar';
+  $('btnDriveAuth').className = 'btn-drive' + (ok ? ' connected' : '');
+  $('btnDriveAuth').textContent = ok ? '✓ Reconectar' : 'Conectar Drive';
+}
+
+// ═══════════════════════════════════════════════════
+//  DRIVE API
+// ═══════════════════════════════════════════════════
+async function driveGet(path, params={}) {
+  if (!token) throw new Error('Sin token');
+  const url = new URL('https://www.googleapis.com/drive/v3/' + path);
+  Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
+  const r = await fetch(url, { headers:{ Authorization:'Bearer '+token } });
+  if (!r.ok) throw new Error(`Drive API ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function driveDownload(fileId) {
+  if (!token) throw new Error('Sin token');
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers:{ Authorization:'Bearer '+token } });
+  if (!r.ok) throw new Error(`Drive download ${r.status}`);
+  return r.arrayBuffer();
+}
+
+async function ultimoArchivo(folderId) {
+  const data = await driveGet('files', {
+    q: `'${folderId}' in parents and trashed=false and (name contains '.xlsx' or name contains '.xls')`,
+    orderBy: 'modifiedTime desc', pageSize: '5',
+    fields: 'files(id,name,modifiedTime)',
+  });
+  if (!data.files?.length) throw new Error('No hay archivos Excel en la carpeta');
+  return data.files[0];
+}
+
+// ═══════════════════════════════════════════════════
+//  CARGA DE FUENTES
+// ═══════════════════════════════════════════════════
+async function cargarAlycDrive(alycName, folderId) {
+  if (!token) { alert('Conectá Drive primero'); return; }
+  const key = alycName.toLowerCase();
+  try {
+    setStatus(key,'loading','Buscando...');
+    const file = await ultimoArchivo(folderId);
+    $(`sc-${key}-name`).textContent = file.name;
+    setStatus(key,'loading',`Descargando ${file.name}...`);
+    log(`☁ ${alycName}: "${file.name}"`);
+    const buf = await driveDownload(file.id);
+    const pos = alycName === 'ADCAP' ? parseADCAP(buf) : parseIEB(buf);
+    posiciones = posiciones.filter(p => p.alyc !== alycName);
+    posiciones.push(...pos);
+    setStatus(key,'ok',`${pos.length} posiciones`);
+    log(`✅ ${alycName}: ${pos.length} posiciones`, 'log-ok');
+    actualizarAlycSelector();
+    if (tickerSeleccionado) aplicarFiltros();
+  } catch(e) {
+    setStatus(key,'error','Error: '+e.message);
+    log(`❌ ${alycName}: ${e.message}`, 'log-err');
+  }
+}
+
+async function cargarBCCH() {
+  if (!token) { alert('Conectá Drive primero'); return; }
+  const FOLDER_ID = '1hKcPBrkb5B889roVRHh3Yx3jXcKPYr9R';
+  try {
+    setStatus('bcch','loading','Buscando archivos...');
+    const data = await driveGet('files', {
+      q: `'${FOLDER_ID}' in parents and trashed=false and (name contains '.xls' or name contains '.xlsx')`,
+      orderBy:'name', pageSize:'200', fields:'files(id,name)',
+    });
+    if (!data.files?.length) { setStatus('bcch','error','Carpeta vacía'); return; }
+    log(`☁ BCCH: ${data.files.length} archivos`);
+    setStatus('bcch','loading',`Descargando ${data.files.length} archivos...`);
+    posiciones = posiciones.filter(p => p.alyc !== 'BCCH');
+    let total = 0;
+    const BATCH = 10;
+    for (let i=0; i<data.files.length; i+=BATCH) {
+      await Promise.all(data.files.slice(i,i+BATCH).map(async file => {
+        try {
+          const buf = await driveDownload(file.id);
+          const comitente = normCC(file.name.replace(/\.xls(x)?$/i,'').trim());
+          const pos = parseBCCH(buf, comitente);
+          posiciones.push(...pos);
+          total++;
+        } catch(e) { log(`⚠ BCCH ${file.name}: ${e.message}`, 'log-warn'); }
+      }));
+    }
+    $('sc-bcch-name').textContent = `${total} comitentes`;
+    setStatus('bcch','ok',`${total} comitentes cargados`);
+    log(`✅ BCCH: ${total} comitentes`, 'log-ok');
+    actualizarAlycSelector();
+    if (tickerSeleccionado) aplicarFiltros();
+  } catch(e) {
+    setStatus('bcch','error','Error: '+e.message);
+    log(`❌ BCCH: ${e.message}`, 'log-err');
+  }
+}
+
+async function cargarClientesDrive() {
+  if (!token) { alert('Conectá Drive primero'); return; }
+  const FOLDER_ID = '1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2';
+  try {
+    setStatus('clientes','loading','Buscando...');
+    const file = await ultimoArchivo(FOLDER_ID);
+    $('sc-clientes-name').textContent = file.name;
+    setStatus('clientes','loading',`Descargando...`);
+    const buf = await driveDownload(file.id);
+    parseClientes(buf);
+    setStatus('clientes','ok',`${clientes.length} clientes`);
+    log(`✅ Clientes: ${clientes.length}`, 'log-ok');
+    if (tickerSeleccionado) aplicarFiltros();
+  } catch(e) {
+    setStatus('clientes','error','Error: '+e.message);
+    log(`❌ Clientes: ${e.message}`, 'log-err');
+  }
+}
+
+async function cargarTodo() {
+  $('processLog').innerHTML = '';
+  $('processLog').style.display = 'block';
+  log('☁ Cargando todo desde Drive...');
+  await Promise.all([
+    cargarAlycDrive('ADCAP','1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2'),
+    cargarAlycDrive('IEB','16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ'),
+    cargarBCCH(),
+    cargarClientesDrive(),
+  ]);
+  log(`✅ Listo. Total posiciones: ${posiciones.length}`, 'log-ok');
+}
+
+// local fallback
+function pickAlycLocal(alycName) {
+  const input = $('fileInput');
+  input.onchange = async () => {
+    const file = input.files[0]; if (!file) return;
+    const buf = await file.arrayBuffer();
+    const pos = alycName==='ADCAP' ? parseADCAP(buf) : parseIEB(buf);
+    posiciones = posiciones.filter(p => p.alyc !== alycName);
+    posiciones.push(...pos);
+    setStatus(alycName.toLowerCase(),'ok',`${pos.length} posiciones (local)`);
+    log(`✅ ${alycName} local: ${pos.length}`, 'log-ok');
+    actualizarAlycSelector();
+    if (tickerSeleccionado) aplicarFiltros();
+    input.value='';
+  };
+  input.click();
+}
+function pickClientesLocal() {
+  const input = $('fileInput');
+  input.onchange = async () => {
+    const file = input.files[0]; if (!file) return;
+    parseClientes(await file.arrayBuffer());
+    setStatus('clientes','ok',`${clientes.length} clientes (local)`);
+    log(`✅ Clientes local: ${clientes.length}`, 'log-ok');
+    if (tickerSeleccionado) aplicarFiltros();
+    input.value='';
+  };
+  input.click();
+}
+
+// ═══════════════════════════════════════════════════
+//  PARSERS (del Rotador)
+// ═══════════════════════════════════════════════════
+function parseNum(val) {
+  if (val===null||val===undefined||val==='') return 0;
+  if (typeof val==='number') return val;
+  const s = String(val).trim().replace(/\$/g,'').replace(/\s/g,'').replace(/\./g,'').replace(',','.');
+  const n = parseFloat(s);
+  return isFinite(n)?n:0;
+}
+
+function parseClientes(buf) {
+  const wb = XLSX.read(buf, {type:'array'});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+  const first = rows[0]||{};
+  const ccKey = Object.keys(first).find(k => /^(cc|ccc|cuenta|comitente)/i.test(k.trim())) || Object.keys(first)[0]||'cc';
+  clientes = rows.map(r => ({
+    cc:      normCC(r[ccKey]??r.cc??r.CC??r.CCC??r.Cuenta??''),
+    cliente: String(r.cliente||r.Cliente||r.CLIENTE||'').trim(),
+    alyc:    String(r.alyc||r.ALyC||r.ALYC||'').trim().toUpperCase(),
+  })).filter(r=>r.cc);
+}
+
+function findCliente(comitente) {
+  const norm = normCC(comitente);
+  return clientes.find(c => normCC(c.cc)===norm);
+}
+
+function parseADCAP(buf) {
+  const wb = XLSX.read(buf,{type:'array'});
+  const sheetName = wb.SheetNames.find(n=>/reporte/i.test(n))||wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
+  const pos=[]; let currentTicker=null; let ignorar=false;
+  const IGNORAR=/posici[oó]n informativa|posiciones tomadas|colocadas/i;
+  const CASH_ARS=/^\$\s*-|^pesos/i;
+  const CASH_USD=/dolar\s*7000|dolar\s*mep|dolar\s*cable|usd\s*7000|usd\s*[cdo]\s*-/i;
+  rows.forEach(row=>{
+    const col0=String(row[0]??'').trim();
+    if(!col0) return;
+    if(IGNORAR.test(col0)){ignorar=true;currentTicker=null;return;}
+    const esNum=!isNaN(col0)&&col0!=='';
+    if(!esNum&&col0.includes(' / ')&&!col0.includes(' - ')){ignorar=false;currentTicker=null;return;}
+    if(!esNum&&col0.includes(' - ')){
+      if(ignorar) return;
+      if(CASH_ARS.test(col0)) currentTicker='CASH_ARS';
+      else if(CASH_USD.test(col0)) currentTicker='CASH_USD';
+      else currentTicker=col0.split(' - ')[0].trim().toUpperCase();
+      return;
+    }
+    if(esNum&&currentTicker&&!ignorar){
+      const tenencia=parseFloat(row[3]);
+      const esCash=currentTicker==='CASH_ARS'||currentTicker==='CASH_USD';
+      if(isFinite(tenencia)&&(esCash?tenencia!==0:tenencia>0))
+        pos.push({alyc:'ADCAP',comitente:normCC(col0),ticker:currentTicker,tenencia});
+    }
+  });
+  return pos;
+}
+
+function parseIEB(buf) {
+  const wb = XLSX.read(buf,{type:'array'});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
+  const CASH_ARS=new Set(['Pesos','PESOS','$']);
+  const CASH_USD=new Set(['USD','DOLARUSA','DOLAR EXT.','DÓLAR','DOLAR']);
+  const pos=[];
+  rows.slice(1).forEach(row=>{
+    if(!row) return;
+    const comitente=normCC(row[1]??'');
+    const ticker=String(row[5]??'').trim();
+    const tenencia=parseFloat(row[8]);
+    if(!comitente||!ticker||ticker==='-') return;
+    if(!isFinite(tenencia)||tenencia===0) return;
+    let t;
+    if(CASH_ARS.has(ticker)) t='CASH_ARS';
+    else if(CASH_USD.has(ticker)) t='CASH_USD';
+    else t=ticker.toUpperCase();
+    if(t!=='CASH_ARS'&&t!=='CASH_USD'&&tenencia<0) return;
+    pos.push({alyc:'IEB',comitente,ticker:t,tenencia});
+  });
+  return pos;
+}
+
+function parseBCCH(buf, comitente) {
+  const pos=[];
+  try {
+    const html=new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/,'');
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    const tables=doc.querySelectorAll('table');
+    if(tables.length<2) return pos;
+    const parseNumBCCH=v=>{
+      const s=String(v||'').trim().replace(/\$/g,'').replace(/\s/g,'').replace(/\./g,'').replace(',','.');
+      const n=parseFloat(s); return isFinite(n)?n:0;
+    };
+    const t1=tables[1];
+    if(t1) t1.querySelectorAll('tr').forEach(row=>{
+      const cells=[...row.querySelectorAll('td,th')].map(c=>c.textContent.trim());
+      const label=(cells[2]||'').toLowerCase();
+      if(label.includes('cuenta corriente pesos')){
+        const imp=parseNumBCCH(cells[cells.length-1]);
+        if(imp!==0) pos.push({alyc:'BCCH',comitente,ticker:'CASH_ARS',tenencia:imp});
+      }
+      if(label.includes('cuenta corriente d')){
+        const m=(cells[3]||'').match(/Cantidad USD[:\s]*([-\d.,]+)/i);
+        if(m){const q=parseNumBCCH(m[1]);if(q!==0)pos.push({alyc:'BCCH',comitente,ticker:'CASH_USD',tenencia:q});}
+      }
+    });
+    for(let t=2;t<=3&&t<tables.length;t++){
+      [...tables[t].querySelectorAll('tr')].slice(1).forEach(row=>{
+        const cells=[...row.querySelectorAll('td,th')].map(c=>c.textContent.trim());
+        const ticker=(cells[1]||'').trim().toUpperCase();
+        if(!ticker||/^(ticker|subtotal|total)/i.test(ticker)) return;
+        const tenencia=parseNumBCCH(cells[3]||'');
+        if(!isFinite(tenencia)||tenencia===0) return;
+        pos.push({alyc:'BCCH',comitente,ticker,tenencia});
+      });
+    }
+  } catch(e) { console.warn('BCCH parse error',comitente,e); }
+  return pos;
+}
+
+// ═══════════════════════════════════════════════════
+//  TICKER SEARCH
+// ═══════════════════════════════════════════════════
+function getTickersSugeridos(q) {
+  const counts={};
+  posiciones.forEach(p=>{
+    if(p.ticker==='CASH_ARS'||p.ticker==='CASH_USD') return;
+    if(!counts[p.ticker]) counts[p.ticker]=0;
+    counts[p.ticker]++;
+  });
+  const q2=(q||'').toUpperCase().trim();
+  return Object.entries(counts)
+    .filter(([t])=>!q2||t.includes(q2))
+    .sort((a,b)=>b[1]-a[1]);
+}
+
+function onTickerInput() {
+  openTickerDrop();
+}
+
+function openTickerDrop() {
+  const q=$('tickerInput').value;
+  const items=getTickersSugeridos(q);
+  const drop=$('tickerDrop');
+  if(!items.length){drop.classList.remove('open');return;}
+  drop.innerHTML=items.slice(0,30).map(([t,n])=>`
+    <div class="ticker-item" onclick="seleccionarTicker('${t}')">
+      <span class="ti-sym">${t}</span>
+      <span class="ti-count">${n} cliente${n!==1?'s':''}</span>
+    </div>`).join('');
+  drop.classList.add('open');
+}
+
+function seleccionarTicker(t) {
+  tickerSeleccionado=t;
+  $('tickerInput').value=t;
+  $('tickerDrop').classList.remove('open');
+  cantidades={};
+  aplicarFiltros();
+}
+
+document.addEventListener('click', e=>{
+  if(!e.target.closest('.ticker-search-wrap')) $('tickerDrop').classList.remove('open');
+});
+
+// ═══════════════════════════════════════════════════
+//  FILTROS Y RENDER
+// ═══════════════════════════════════════════════════
+function actualizarAlycSelector() {
+  const alycs=[...new Set(posiciones.map(p=>p.alyc))].sort();
+  const sel=$('filterAlyc');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">Todas</option>'+alycs.map(a=>`<option>${a}</option>`).join('');
+  if(cur) sel.value=cur;
+}
+
+function setPct(pct) {
+  pctGlobal=pct;
+  document.querySelectorAll('.pct-btn').forEach(b=>b.classList.remove('active'));
+  // find and activate matching button
+  document.querySelectorAll('.pct-btn').forEach(b=>{
+    if(b.textContent===pct+'%') b.classList.add('active');
+  });
+  aplicarCantidades();
+  renderOrdenes();
+}
+
+function calcularCantidad(tenencia, pct) {
+  return Math.round(tenencia * pct / 100);
+}
+
+function aplicarCantidades() {
+  // Recalcular cantidades sugeridas para todos (no las editadas manualmente)
+  const filterAlyc=$('filterAlyc').value;
+  posiciones.filter(p=>{
+    if(!tickerSeleccionado||p.ticker!==tickerSeleccionado) return false;
+    if(filterAlyc&&p.alyc!==filterAlyc) return false;
+    return true;
+  }).forEach(p=>{
+    const key=rowKey(p);
+    // solo actualizar si NO fue editado manualmente
+    if(!cantidades[key+'_manual']) {
+      cantidades[key]=calcularCantidad(p.tenencia, pctGlobal);
+    }
+  });
+}
+
+function rowKey(p) { return `${p.alyc}|${p.comitente}`; }
+
+function aplicarFiltros() {
+  aplicarCantidades();
+  renderOrdenes();
+}
+
+// ═══════════════════════════════════════════════════
+//  LOCALSTORAGE para enviados
+// ═══════════════════════════════════════════════════
+function getSent() {
+  try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]')); } catch { return new Set(); }
+}
+function addSent(key) {
+  const s=getSent(); s.add(key);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...s]));
+}
+function resetEnviados() {
+  localStorage.removeItem(STORAGE_KEY);
+  renderOrdenes();
+}
+
+// ═══════════════════════════════════════════════════
+//  FORMATO MENSAJE
+// ═══════════════════════════════════════════════════
+function formatFechaHora() {
+  const now = new Date();
+  const dd=String(now.getDate()).padStart(2,'0');
+  const mm=String(now.getMonth()+1).padStart(2,'0');
+  const yyyy=now.getFullYear();
+  const hh=String(now.getHours()).padStart(2,'0');
+  const min=String(now.getMinutes()).padStart(2,'0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${min}hs`;
+}
+
+function formatMsg(p, cantidad) {
+  const cli=findCliente(p.comitente);
+  const nombre=cli?.cliente||p.comitente;
+  const ts=formatFechaHora();
+  return `cC ${p.comitente} ${nombre}
+Título ${p.ticker}
+Operación Venta
+Cantidad ${cantidad}
+Precio de Mercado
+Plazo 24hs
+${ts}`;
+}
+
+function waLink(p, cantidad) {
+  return `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(formatMsg(p,cantidad))}`;
+}
+
+// ═══════════════════════════════════════════════════
+//  RENDER ÓRDENES
+// ═══════════════════════════════════════════════════
+function marcarEnviado(key) {
+  addSent(key);
+  aplicarEstadoEnviado(key);
+  showToast();
+}
+
+function aplicarEstadoEnviado(key) {
+  const row=document.getElementById('row-'+CSS.escape(key));
+  const cell=document.getElementById('cell-'+CSS.escape(key));
+  if(row) row.classList.add('row-sent');
+  if(cell) cell.innerHTML='<span class="badge-sent">✓ Enviado</span>';
+  updateOrdenesCount();
+}
+
+function updateOrdenesCount() {
+  const total=document.querySelectorAll('tr[id^="row-"]').length;
+  const enviados=document.querySelectorAll('tr.row-sent').length;
+  $('ordenesCount').textContent=total?`${total-enviados} pendientes · ${enviados} enviadas`:'';
+}
+
+function renderOrdenes() {
+  const body=$('ordenesBody');
+  const filterAlyc=$('filterAlyc').value;
+
+  if(!tickerSeleccionado) {
+    body.innerHTML=`<div class="empty-state"><div class="es-icon">📋</div><p>Buscá un ticker para ver las órdenes</p><small>Cargá los datos de Drive y luego filtrá por ticker</small></div>`;
+    $('tickerBadge').textContent='—';
+    $('ordenesCount').textContent='';
+    return;
+  }
+
+  $('tickerBadge').textContent=tickerSeleccionado;
+
+  const filas=posiciones.filter(p=>{
+    if(p.ticker!==tickerSeleccionado) return false;
+    if(filterAlyc&&p.alyc!==filterAlyc) return false;
+    return true;
+  });
+
+  if(!filas.length) {
+    body.innerHTML=`<div class="empty-state"><div class="es-icon">🔍</div><p>Ningún cliente tiene <strong>${tickerSeleccionado}</strong></p><small>Probá otra ALyC o verificá los datos cargados</small></div>`;
+    $('ordenesCount').textContent='';
+    return;
+  }
+
+  const sent=getSent();
+
+  body.innerHTML=`
+    <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>ALyC</th>
+        <th>Cuenta</th>
+        <th>Cliente</th>
+        <th class="td-r">Tenencia</th>
+        <th class="td-r">Cantidad a vender</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(p=>{
+        const key=rowKey(p);
+        const cli=findCliente(p.comitente);
+        const nombre=cli?.cliente||'—';
+        const cant=cantidades[key]??calcularCantidad(p.tenencia,pctGlobal);
+        const isSent=sent.has(key);
+        const link=waLink(p,cant);
+        return `<tr id="row-${key}" class="${isSent?'row-sent':''}">
+          <td><span style="font-size:10px;font-weight:700;color:var(--text2);letter-spacing:.06em;">${p.alyc}</span></td>
+          <td class="td-bold">cC ${p.comitente}</td>
+          <td style="color:var(--text2);">${nombre}</td>
+          <td class="td-r" style="color:var(--text2);">${p.tenencia.toLocaleString('es-AR')}</td>
+          <td class="td-r">
+            <div class="cant-wrap" style="justify-content:flex-end;">
+              <span class="cant-sug">${calcularCantidad(p.tenencia,pctGlobal)} sug.</span>
+              <input class="cant-input" id="inp-${key}" type="number" value="${cant}"
+                min="0" max="${p.tenencia}"
+                onchange="onCantChange('${key}','${p.alyc}','${p.comitente}',${p.tenencia})"
+                oninput="onCantChange('${key}','${p.alyc}','${p.comitente}',${p.tenencia})" />
+            </div>
+          </td>
+          <td id="cell-${key}">
+            ${isSent
+              ? '<span class="badge-sent">✓ Enviado</span>'
+              : `<a class="btn-enviar" href="${link}" target="_blank" onclick="marcarEnviado('${key}')">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  Enviar
+                </a>`
+            }
+          </td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>
+    </div>`;
+
+  updateOrdenesCount();
+}
+
+// Cuando el usuario edita la cantidad a mano
+function onCantChange(key, alyc, comitente, tenencia) {
+  const inp=document.getElementById('inp-'+key);
+  if(!inp) return;
+  let val=parseInt(inp.value)||0;
+  if(val<0) val=0;
+  if(val>tenencia) val=tenencia;
+  cantidades[key]=val;
+  cantidades[key+'_manual']=true;
+  // Actualizar el href del link de WA con la nueva cantidad
+  const p=posiciones.find(p=>p.alyc===alyc&&normCC(p.comitente)===normCC(comitente)&&p.ticker===tickerSeleccionado);
+  if(!p) return;
+  const cell=document.getElementById('cell-'+key);
+  if(!cell) return;
+  const a=cell.querySelector('a.btn-enviar');
+  if(a) a.href=waLink(p,val);
+}
+
+function resetTodo() {
+  tickerSeleccionado=null;
+  cantidades={};
+  $('tickerInput').value='';
+  $('filterAlyc').value='';
+  renderOrdenes();
+}
+
+// ═══════════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════════
+let toastTimer;
+function showToast() {
+  const t=$('toast');
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+// ═══════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════
+restoreToken();
+</script>
+</body>
+</html>
