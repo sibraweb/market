@@ -1106,12 +1106,12 @@ function resetEnviadosCompra() { localStorage.removeItem(SENT_KEY_C); renderComp
 function formatVenta(p,cantidad) {
   const cli=findCliente(p.comitente);
   const nombre=cli?.cliente||p.comitente;
-  return `CC ${p.comitente} ${nombre}\nOperación Venta\nTítulo ${p.ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\n${fechaLegible()}`;
+  return `CC ${p.comitente} ${nombre}\nOperación Venta\nTítulo ${p.ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\nAlyc ${alyc}\n${fechaLegible()}`;
 }
 function formatCompra(alyc,comitente,ticker,cantidad) {
   const cli=findCliente(comitente);
   const nombre=cli?.cliente||comitente;
-  return `CC ${comitente} ${nombre}\nOperación Compra\nTítulo ${ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\nAlyc ${alyc}\ ${fechaLegible()}`;
+  return `CC ${comitente} ${nombre}\nOperación Compra\nTítulo ${ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\nAlyc ${alyc}\ n${fechaLegible()}`;
 }
 function waLink(msg) { return `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(msg)}`; }
 
