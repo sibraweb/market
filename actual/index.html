@@ -2444,7 +2444,7 @@ function parseNumBCCH(val) {
   return isFinite(n) ? n : 0;
 }
 
-// Parser principal BCCH — detecta formato automáticamente
+// Parser principal BCCH — siempre DOMParser (probado con archivos reales)
 function parseBCCHFile(buf, comitente) {
   const posiciones = [];
   try {
@@ -2454,37 +2454,28 @@ function parseBCCHFile(buf, comitente) {
     const isCFB = header[0] === 0xD0 && header[1] === 0xCF;
 
     if (isPK || isCFB) {
-      // XLSX o XLS binario real
       const wb = XLSX.read(buf, { type: 'array' });
       return parseBCCHWorkbook(wb, comitente);
     }
 
-    // HTML disfrazado de XLS — decodificar
+    // HTML — decodificar con ignoreBOM
     const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
     const html    = decoder.decode(buf).trim();
-
-    // Detectar formato: portafolioResumido vs portafolioOnline
-    const esResumido = html.includes('portafolioResumido') || html.includes('result-portafolioResumido');
+    const esResumido = html.includes('portafolioResumido');
     log(`  ℹ BCCH ${comitente}: ${esResumido ? 'Resumido' : 'Online'}`, 'log-ok');
 
-    // Intentar XLSX string mode primero
-    try {
-      const wb = XLSX.read(html, { type: 'string' });
-      if (wb && wb.SheetNames && wb.SheetNames.length >= 2) {
-        return parseBCCHWorkbook(wb, comitente);
-      }
-    } catch(e) { /* continuar con DOMParser */ }
-
-    // Fallback: DOMParser
+    // Siempre usar DOMParser — probado y funciona con ambos formatos
     const doc    = (new DOMParser()).parseFromString(html, 'text/html');
     const tables = [...doc.querySelectorAll('table')];
-    log(`  ℹ BCCH ${comitente}: DOMParser → ${tables.length} tablas`, 'log-ok');
+    log(`  ℹ BCCH ${comitente}: ${tables.length} tablas`, 'log-ok');
 
     if (esResumido) {
       parseBCCHResumidoDOM(tables, comitente, posiciones);
     } else {
       parseBCCHOnlineDOM(tables, comitente, posiciones);
     }
+
+    log(`  ✓ BCCH ${comitente}: ${posiciones.length} posiciones`, 'log-ok');
   } catch(e) {
     log(`❌ BCCH ${comitente}: ${e.message}`, 'log-err');
   }
@@ -2539,15 +2530,23 @@ function parseBCCHWorkbook(wb, comitente) {
   return posiciones;
 }
 
-// DOMParser — portafolioResumido (4 tablas: encabezado, cash, pesos, dolares)
+// DOMParser — portafolioResumido
 function parseBCCHResumidoDOM(tables, comitente, posiciones) {
-  // Tabla 1: cash
-  if (tables[1]) {
-    [...tables[1].querySelectorAll('tr')].forEach(row => {
+  // Cash: buscar en TODAS las tablas la fila con "cuenta corriente"
+  // (el browser puede numerar tablas diferente por tablas anidadas)
+  const allRows = [...(new DOMParser())
+    .parseFromString('', 'text/html').querySelectorAll('tr')];  // placeholder
+
+  // Buscar cash en tabla 1 (índice flexible)
+  for (let ti = 1; ti < Math.min(tables.length, 3); ti++) {
+    [...tables[ti].querySelectorAll('tr')].forEach(row => {
+      // Solo filas directas, no anidadas
+      if (row.closest('table') !== tables[ti]) return;
       const cells = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
-      const label = (cells[2] || '').toLowerCase();
+      if (cells.length < 3) return;
+      const label = cells[2].toLowerCase();
       if (label.includes('cuenta corriente pesos')) {
-        const imp = parseNumBCCH(cells[5] || cells[cells.length-1]);
+        const imp = parseNumBCCH(cells[5] !== undefined ? cells[5] : cells[cells.length-1]);
         if (imp !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_ARS', tenencia: imp });
       }
       if (label.includes('cuenta corriente') && (label.includes('dólar') || label.includes('dolar'))) {
@@ -2559,9 +2558,17 @@ function parseBCCHResumidoDOM(tables, comitente, posiciones) {
       }
     });
   }
-  // Tablas 2 y 3: posiciones (ticker en col 1, cantidad en col 3)
-  for (let t = 2; t <= 3 && t < tables.length; t++) {
-    [...tables[t].querySelectorAll('tr')].slice(1).forEach(row => {
+
+  // Posiciones: buscar tablas que tengan "Ticker" en el header
+  tables.forEach((tabla, ti) => {
+    if (ti < 2) return; // skip encabezado y cash
+    const rows = [...tabla.querySelectorAll('tr')].filter(r => r.closest('table') === tabla);
+    if (rows.length === 0) return;
+    const header = rows[0].querySelectorAll('td,th');
+    const hasTickerHeader = [...header].some(c => c.textContent.trim().toLowerCase() === 'ticker');
+    if (!hasTickerHeader) return;
+
+    rows.slice(1).forEach(row => {
       const cells  = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
       const ticker = (cells[1]||'').trim().toUpperCase();
       if (!ticker || /^(ticker|subtotal|total)/i.test(ticker)) return;
@@ -2569,18 +2576,20 @@ function parseBCCHResumidoDOM(tables, comitente, posiciones) {
       if (tenencia === 0) return;
       posiciones.push({ alyc:'BCCH', comitente, ticker, tenencia });
     });
-  }
+  });
 }
 
-// DOMParser — portafolioOnline (5 tablas: encabezado, cash-resumen, posiciones, venc$, vencUSD)
+// DOMParser — portafolioOnline
 function parseBCCHOnlineDOM(tables, comitente, posiciones) {
-  // Tabla 1: cash
-  if (tables[1]) {
-    [...tables[1].querySelectorAll('tr')].forEach(row => {
+  // Cash: buscar fila con "Cuenta Corriente" en tabla 1
+  for (let ti = 1; ti < Math.min(tables.length, 3); ti++) {
+    [...tables[ti].querySelectorAll('tr')].forEach(row => {
+      if (row.closest('table') !== tables[ti]) return;
       const cells = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
-      const label = (cells[2]||'').toLowerCase();
+      if (cells.length < 3) return;
+      const label = cells[2].toLowerCase();
       if (label.includes('cuenta corriente $') || label.includes('cuenta corriente pesos')) {
-        const imp = parseNumBCCH(cells[5]||cells[cells.length-1]);
+        const imp = parseNumBCCH(cells[5] !== undefined ? cells[5] : cells[cells.length-1]);
         if (imp !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_ARS', tenencia: imp });
       }
       if (label.includes('cuenta corriente u$s') || label.includes('cuenta corriente dólar') || label.includes('cuenta corriente dolar')) {
@@ -2590,25 +2599,27 @@ function parseBCCHOnlineDOM(tables, comitente, posiciones) {
       }
     });
   }
-  // Tabla 2: posiciones — nombre en col 1 como "TICKER Nombre completo", cantidad en col 3
-  const SKIP_ONLINE = new Set(['pesos','u$s','subtotal cuenta corriente','subtotal acciones',
-    'subtotal cedears','subtotal bonos','subtotal letras','subtotal fci','nombre de la especie']);
-  if (tables[2]) {
-    [...tables[2].querySelectorAll('tr')].forEach(row => {
+
+  // Posiciones: buscar tabla con "Nombre de la Especie" en header
+  const SKIP = new Set(['pesos','u$s','nombre de la especie']);
+  tables.forEach((tabla, ti) => {
+    if (ti < 2) return;
+    const rows = [...tabla.querySelectorAll('tr')].filter(r => r.closest('table') === tabla);
+    if (rows.length === 0) return;
+    const header = [...rows[0].querySelectorAll('td,th')].map(c => c.textContent.trim().toLowerCase());
+    if (!header.some(h => h.includes('nombre') || h.includes('especie'))) return;
+
+    rows.forEach(row => {
       const cells  = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
       const nombre = (cells[1]||'').trim();
-      if (!nombre) return;
-      const nombreLower = nombre.toLowerCase();
-      if (SKIP_ONLINE.has(nombreLower)) return;
-      if (/^subtotal/i.test(nombre)) return;
-      if (/^(vencimiento|saldo|garantia)/i.test(nombre)) return;
-      // Ticker = primera palabra
+      if (!nombre || SKIP.has(nombre.toLowerCase())) return;
+      if (/^(subtotal|vencimiento|saldo|garantia|estado)/i.test(nombre)) return;
       const ticker   = nombre.split(/\s+/)[0].toUpperCase();
       const tenencia = parseNumBCCH(cells[3]||'');
       if (!ticker || tenencia === 0) return;
       posiciones.push({ alyc:'BCCH', comitente, ticker, tenencia });
     });
-  }
+  });
 }
 
 
