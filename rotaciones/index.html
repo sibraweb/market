@@ -206,7 +206,7 @@ tr:hover td{background:#0d1117}
 // ══════════════════════════════════════════════════════
 const CFG = {
   CLIENT_ID: "891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com",
-  SCOPES: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+  SCOPES: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file openid email profile",
   DRIVE: {
     CARPETA_CLIENTES:    "1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2",
     CARPETA_PAPELES:     "1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI",
@@ -302,57 +302,38 @@ const Auth = {
   },
 
   async init(){
-    // Debug: mostrar URL actual
-    const dbg = document.createElement("div");
-    dbg.style.cssText="position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:10px;padding:6px 12px;font-family:monospace;z-index:9999;line-height:1.6";
-    dbg.id="debug-bar";
-    document.body.appendChild(dbg);
-    const log = msg => { dbg.innerHTML += msg+"<br/>"; console.log(msg); };
-
-    log("URL: "+location.href);
-    log("Hash: "+location.hash||"(vacío)");
-    log("Origin: "+location.origin);
-    log("redirect_uri que se usará: "+location.origin+location.pathname);
-
     // 1. Token en el hash (justo volviendo del redirect de Google)
     if(Auth.leerTokenDesdeHash()){
-      log("✓ Token encontrado en hash");
-      try{
-        await Auth.cargarUsuario();
-        log("✓ Usuario cargado: "+S.usuario?.email);
-        Auth.mostrarApp();
-      }catch(e){ log("✗ Error usuario: "+e.message); }
+      await Auth.cargarUsuario(); // no-fatal
+      Auth.mostrarApp();
       return;
     }
-    log("Sin token en hash");
-
     // 2. Token guardado en sesión
     const saved = sessionStorage.getItem("sb_token");
     if(saved){
-      log("Token en sessionStorage — intentando...");
       S.token = saved;
       const u = sessionStorage.getItem("sb_user");
-      if(u){ S.usuario = JSON.parse(u); log("✓ Sesión restaurada"); Auth.mostrarApp(); return; }
-      try{
-        await Auth.cargarUsuario();
-        log("✓ Usuario cargado: "+S.usuario?.email);
+      if(u){
+        S.usuario = JSON.parse(u);
         Auth.mostrarApp();
         return;
-      }catch(e){ log("✗ Token expirado: "+e.message); sessionStorage.clear(); }
+      }
+      await Auth.cargarUsuario(); // no-fatal
+      Auth.mostrarApp();
+      return;
     }
-
     // 3. Mostrar pantalla de login
-    log("→ Mostrando login");
     $("login-screen").style.display = "flex";
   },
 
   async cargarUsuario(){
-    const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{
-      headers: {Authorization:"Bearer "+S.token}
-    });
-    if(!r.ok) throw new Error("No se pudo obtener usuario");
-    S.usuario = await r.json();
-    sessionStorage.setItem("sb_user", JSON.stringify(S.usuario));
+    // No-fatal: si falla el userinfo la app igual arranca
+    try{
+      const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{
+        headers: {Authorization:"Bearer "+S.token}
+      });
+      if(r.ok){ S.usuario = await r.json(); sessionStorage.setItem("sb_user", JSON.stringify(S.usuario)); }
+    }catch(e){ console.warn("[Auth] userinfo no disponible:", e.message); }
   },
 
   mostrarApp(){
