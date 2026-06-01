@@ -495,64 +495,45 @@ const Datos = {
   // ── Carteras modelo ───────────────────────────────────
   async cargarCarteras(){
     const archivos = await Drive.listar(CFG.DRIVE.CARPETA_PAPELES);
-    // Buscar el archivo de cartera agresivo (el único que hay)
     const xlsx = archivos[0];
     if(!xlsx) throw new Error("No se encontró archivo de carteras en Drive");
     const buf   = await Drive.bajar(xlsx.id);
     const hojas = Drive.leerXlsx(buf);
-    S.carteras  = {};
+    S.carteras  = {AGRESIVO:[], MODERADO:[], CONSERVADOR:[]};
 
-    // El archivo tiene un layout con 4 bloques en columnas:
-    // LARGO (cols A-D), MEDIO (cols K-N), CORTO (cols U-X), CASH/PALANCA (cols AA-AD)
-    // Buscamos la fila que tiene "PLAZO" como header
-    const ws = hojas[Object.keys(hojas)[0]] || [];
+    // La hoja correcta se llama "CARTERA"
+    // Estructura: col0=PLAZO, col1=PONDERACION, col2=PAPEL, col6=PERFIL
+    // Fila 3 (índice 2) = headers, datos desde fila 4 (índice 3)
+    const nombreHoja = Object.keys(hojas).find(n=>n.toUpperCase()==="CARTERA") || Object.keys(hojas)[0];
+    const rows = hojas[nombreHoja] || [];
 
-    // Encontrar la fila de headers (contiene "PLAZO" y "PAPEL")
-    let hRow = -1;
-    for(let i=0;i<ws.length;i++){
-      const r = ws[i].map(v=>String(v||"").toUpperCase());
-      if(r.includes("PLAZO") && r.includes("PAPEL")){ hRow=i; break; }
-    }
-    if(hRow<0){ console.warn("[Carteras] No se encontró fila de headers"); S.carteras={AGRESIVO:[],MODERADO:[],CONSERVADOR:[]}; return; }
-
-    // Layout de columnas (base 0):
-    // LARGO: plazo=0, papel=2, pond=3
-    // MEDIO: plazo=11, papel=13, pond=14  (o similar — lo detectamos)
-    // Encontrar los offsets de cada bloque buscando "PLAZO" en la fila de headers
-    const hdr = ws[hRow].map((v,i)=>({v:String(v||"").toUpperCase(),i}));
-    const plazoCols = hdr.filter(x=>x.v==="PLAZO").map(x=>x.i);
-    const papelCols = hdr.filter(x=>x.v==="PAPEL").map(x=>x.i);
-    const pondCols  = hdr.filter(x=>x.v==="PONDERACION EN PLAZO"||x.v.includes("PONDERACION EN P")).map(x=>x.i);
-
-    console.log("[Carteras] Bloques encontrados:",plazoCols.length,"PLAZO cols:",plazoCols);
-
-    // Iterar filas de datos
-    const tickers = {}; // { ticker: { plazo, pond } }
-    for(let i=hRow+1;i<ws.length;i++){
-      const row = ws[i];
-      for(let b=0;b<plazoCols.length;b++){
-        const plazoCol = plazoCols[b];
-        const papelCol = papelCols[b];
-        const pondCol  = pondCols[b];
-        if(papelCol===undefined||pondCol===undefined) continue;
-        const plazo  = String(row[plazoCol]||"").trim().toUpperCase();
-        const papel  = String(row[papelCol]||"").trim().toUpperCase();
-        const pondRaw= String(row[pondCol]||"").trim();
-        const pond   = normPct(pondRaw);
-        if(!papel||papel==="-"||papel==="PAPEL"||pond<=0) continue;
-        if(!tickers[papel]) tickers[papel]={};
-        tickers[papel][plazo] = (tickers[papel][plazo]||0)+pond;
-      }
+    // Encontrar fila de headers buscando "PLAZO"
+    let dataStart = 3; // default
+    for(let i=0;i<Math.min(10,rows.length);i++){
+      const r = rows[i].map(v=>String(v||"").toUpperCase());
+      if(r[0]==="PLAZO" && r[2]==="PAPEL"){ dataStart=i+1; break; }
     }
 
-    // Por ahora el archivo es un solo perfil AGRESIVO
-    // (si en el futuro hay múltiples, se extiende)
-    S.carteras["AGRESIVO"] = Object.entries(tickers).flatMap(([ticker,plazos])=>
-      Object.entries(plazos).map(([plazo,pond])=>({ticker,plazo,pond_plazo:pond}))
-    );
-    S.carteras["MODERADO"]     = S.carteras["AGRESIVO"];
-    S.carteras["CONSERVADOR"]  = S.carteras["AGRESIVO"];
-    console.log("[Carteras] AGRESIVO:",S.carteras["AGRESIVO"].length,"tickers");
+    for(let i=dataStart; i<rows.length; i++){
+      const row    = rows[i];
+      const plazo  = String(row[0]||"").trim().toUpperCase();
+      const pond   = parseFloat(row[1])||0;   // PONDERACION EN CARTERA (decimal)
+      const papel  = String(row[2]||"").trim().toUpperCase();
+      const perfil = String(row[6]||"").trim().toUpperCase();
+
+      // Saltar filas inválidas o PALANCA
+      if(!plazo||!papel||!perfil) continue;
+      if(plazo==="PALANCA") continue;         // la caución tomadora no es posición a comprar
+      if(pond<=0) continue;
+      if(!(perfil in S.carteras)) continue;
+
+      S.carteras[perfil].push({ plazo, ticker: papel, pond_plazo: pond });
+    }
+
+    // Log diagnóstico
+    for(const p of ["AGRESIVO","MODERADO","CONSERVADOR"]){
+      console.log(`[Carteras] ${p}: ${S.carteras[p].length} tickers`);
+    }
     return S.carteras;
   },
 
@@ -634,38 +615,98 @@ const Datos = {
 
   // ── Tenencia BCCH ─────────────────────────────────────
   _parsearBCCH(htmlStr){
-    // BCCH envía HTML disfrazado de XLS
+    // Números en formato argentino: 1.234.567,89 → hay que invertir sep
+    const parseARS = s => {
+      if(!s) return 0;
+      // quitar $, espacios, y el punto de miles; reemplazar coma decimal por punto
+      const clean = String(s).replace(/[$ ]/g,"").replace(/\./g,"").replace(",",".");
+      return parseFloat(clean)||0;
+    };
+
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlStr,"text/html");
     const tablas = [...doc.querySelectorAll("table")];
-    let cashPesos=0,cashUSD=0,caucionPesos=0;
+    let cashPesos=0, cashUSD=0, caucionPesos=0;
     const pos=[];
     if(!tablas.length) return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
 
-    // Tabla 1 (índice 0) = cash
-    const t0 = tablas[0];
-    for(const tr of t0.querySelectorAll("tr")){
-      const cels=[...tr.querySelectorAll("td,th")].map(c=>c.textContent.trim());
-      const monto=parseFloat(String(cels[1]||"").replace(/[$,\s]/g,""))||0;
-      const txt=(cels[0]||"").toLowerCase();
-      if(txt.includes("peso")||txt.includes("ars")) cashPesos=monto;
-      else if(txt.includes("dolar")||txt.includes("usd")) cashUSD=monto/Math.max(S.tipoCambio||1300,1);
-      else if(txt.includes("cauci")&&monto<0) caucionPesos=Math.abs(monto);
-    }
-    // Tablas 2+ = posiciones
-    for(const tbl of tablas.slice(1)){
+    // ── Tabla de resumen (primera tabla grande con "Pesos", "U$S") ──
+    // Buscar la tabla que tiene "Cuenta Corriente $" o "Pesos"
+    for(const tbl of tablas){
       for(const tr of tbl.querySelectorAll("tr")){
-        const cels=[...tr.querySelectorAll("td")].map(c=>c.textContent.trim());
-        if(cels.length<2) continue;
-        // Col 1: "TICKER Nombre especie"
-        const raw=String(cels[1]||"").trim();
-        const ticker=raw.split(/\s/)[0].toUpperCase();
-        const cant=parseFloat(String(cels[2]||"").replace(/[,\s]/g,""))||0;
-        const pu=Precios.get(ticker)||parseFloat(String(cels[3]||"").replace(/[$,\s]/g,""))||0;
-        if(ticker&&cant>0) pos.push({ticker,especie:raw,cantidad:cant,pu,importe:cant*pu,esFondo:false});
+        const cels = [...tr.querySelectorAll("td,th")].map(c=>c.textContent.trim());
+        const txt0 = (cels[0]||"").toLowerCase();
+        const txt1 = (cels[1]||"").toLowerCase();
+
+        // Cuenta Corriente $ → cash pesos
+        if(txt1.includes("cuenta corriente $")||txt0.includes("cuenta corriente $")){
+          // El importe está en la col 4 (índice 4)
+          const imp = parseARS(cels[4]||cels[5]||"");
+          cashPesos = Math.abs(imp);
+          continue;
+        }
+        // Cuenta Corriente U$S → cash USD (cantidad en col 2, TC en col 3)
+        if(txt1.includes("cuenta corriente u")||txt0.includes("cuenta corriente u")){
+          const cantUSD = parseARS(cels[2]||"");
+          cashUSD = Math.abs(cantUSD);
+          continue;
+        }
+        // Pesos (fila de detalle simple)
+        if((txt1==="pesos "||txt1==="pesos"||txt0==="pesos")&&cels.length>4){
+          const imp = parseARS(cels[4]||cels[5]||"");
+          if(imp>0) cashPesos = imp;
+          continue;
+        }
+        // U$S (fila de detalle simple)
+        if((txt1==="u$s "||txt1==="u$s"||txt0==="u$s")&&cels.length>3){
+          const cantUSD = parseARS(cels[3]||"");
+          if(cantUSD) cashUSD = Math.abs(cantUSD);
+          continue;
+        }
       }
     }
-    return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
+
+    // ── Tabla de posiciones (tiene columnas: Nombre | Estado | Cantidad | Precio | Importe | %...) ──
+    // Buscar la tabla con thead que tenga "Cantidad" y "Precio"
+    for(const tbl of tablas){
+      const thead = tbl.querySelector("thead");
+      if(!thead) continue;
+      const thTexts = [...thead.querySelectorAll("th")].map(t=>t.textContent.trim().toLowerCase());
+      const hasCant  = thTexts.some(t=>t.includes("cantidad"));
+      const hasPrecio= thTexts.some(t=>t.includes("precio"));
+      if(!hasCant||!hasPrecio) continue;
+
+      // Esta es la tabla de posiciones
+      for(const tr of tbl.querySelectorAll("tbody tr")){
+        const cels = [...tr.querySelectorAll("td")].map(c=>c.textContent.trim());
+        if(cels.length<4) continue;
+
+        // Col 1: "TICKER NOMBRE ESPECIE" — el ticker es la primera palabra
+        const raw = String(cels[1]||"").trim();
+        if(!raw||raw.toLowerCase().includes("subtotal")) continue;
+
+        const partes = raw.split(/\s+/);
+        const ticker = partes[0].toUpperCase();
+        if(!ticker||ticker.length<2||ticker.length>8) continue;
+
+        // Col 3: Cantidad (ej: "395,00")
+        const cantidad = parseARS(cels[3]);
+        // Col 4: Precio (ej: "9.390,000")  
+        const precio   = parseARS(cels[4]);
+        // Col 5: Importe (ej: "3.709.050,00")
+        const importe  = parseARS(cels[5]);
+
+        if(cantidad<=0) continue;
+
+        // Usar precio live si existe, sino precio del archivo
+        const pu = Precios.get(ticker) || precio;
+        pos.push({ticker, especie:raw, cantidad, pu, importe:importe||cantidad*pu, esFondo:false});
+      }
+      break; // solo procesar la primera tabla de posiciones
+    }
+
+    console.log(`[BCCH] cash=$${cashPesos.toFixed(0)} USD=${cashUSD.toFixed(2)} pos=${pos.length}`);
+    return {cashPesos, cashUSD, caucionPesos, posiciones:pos};
   },
 
   // ── Cargar tenencia según ALYC ────────────────────────
