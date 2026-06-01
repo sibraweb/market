@@ -302,23 +302,47 @@ const Auth = {
   },
 
   async init(){
+    // Debug: mostrar URL actual
+    const dbg = document.createElement("div");
+    dbg.style.cssText="position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:10px;padding:6px 12px;font-family:monospace;z-index:9999;line-height:1.6";
+    dbg.id="debug-bar";
+    document.body.appendChild(dbg);
+    const log = msg => { dbg.innerHTML += msg+"<br/>"; console.log(msg); };
+
+    log("URL: "+location.href);
+    log("Hash: "+location.hash||"(vacío)");
+    log("Origin: "+location.origin);
+    log("redirect_uri que se usará: "+location.origin+location.pathname);
+
     // 1. Token en el hash (justo volviendo del redirect de Google)
     if(Auth.leerTokenDesdeHash()){
-      await Auth.cargarUsuario();
-      Auth.mostrarApp();
+      log("✓ Token encontrado en hash");
+      try{
+        await Auth.cargarUsuario();
+        log("✓ Usuario cargado: "+S.usuario?.email);
+        Auth.mostrarApp();
+      }catch(e){ log("✗ Error usuario: "+e.message); }
       return;
     }
+    log("Sin token en hash");
+
     // 2. Token guardado en sesión
     const saved = sessionStorage.getItem("sb_token");
     if(saved){
+      log("Token en sessionStorage — intentando...");
       S.token = saved;
       const u = sessionStorage.getItem("sb_user");
-      if(u){ S.usuario = JSON.parse(u); Auth.mostrarApp(); return; }
-      // Obtener datos de usuario con el token guardado
-      try{ await Auth.cargarUsuario(); Auth.mostrarApp(); return; }
-      catch(e){ sessionStorage.clear(); /* Token expirado, mostrar login */ }
+      if(u){ S.usuario = JSON.parse(u); log("✓ Sesión restaurada"); Auth.mostrarApp(); return; }
+      try{
+        await Auth.cargarUsuario();
+        log("✓ Usuario cargado: "+S.usuario?.email);
+        Auth.mostrarApp();
+        return;
+      }catch(e){ log("✗ Token expirado: "+e.message); sessionStorage.clear(); }
     }
+
     // 3. Mostrar pantalla de login
+    log("→ Mostrando login");
     $("login-screen").style.display = "flex";
   },
 
