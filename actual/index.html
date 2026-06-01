@@ -2308,27 +2308,48 @@ function parseIEB(buf) {
   }
   const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
 
-  const CASH_ARS_T = new Set(['Pesos', 'PESOS', '$']);
-  const CASH_USD_T = new Set(['USD', 'DOLARUSA', 'DOLAR EXT.', 'DÓLAR', 'DOLAR']);
-  const IGNORAR_T  = new Set(['-', '']);
-  const posiciones = [];
+  // Columnas IEB (0-indexed):
+  // 1=Comitente, 5=Ticker, 8=SubtotalCantidad, 10=SubtotalImporte,
+  // 14=TipoCambio, 15=SubtotalTipoEspecie
+  // TipoEspecie: 0=acción/cedear, 1=bono/letra, 4=cash, 5=FCI, 6=letra
+
+  const TICKER_CASH_ARS = new Set(['Pesos', 'PESOS', '$']);
+  const TICKER_CASH_USD = new Set(['USD', 'DOLARUSA', 'DOLAR EXT.', 'DÓLAR', 'DOLAR']);
+  const IGNORAR         = new Set(['-', '']);
+  const posiciones      = [];
 
   rows.slice(1).forEach(row => {
-    if (!row) return;                              // ← null-safe
-    const comitente = normCC(row[1] ?? '');
-    const ticker    = String(row[5] ?? '').trim();
-    const tenencia  = parseFloat(row[8]);
+    if (!row) return;
+    const comitente  = normCC(row[1]  ?? '');
+    const ticker     = String(row[5]  ?? '').trim();
+    const cantidad   = parseFloat(row[8]  ?? 0);  // SubtotalCantidad
+    const importe    = parseFloat(row[10] ?? 0);  // SubtotalImporte (ARS)
+    const tipoCambio = parseFloat(row[14] ?? 1) || 1; // TipoCambio (MEP)
+    const tipoEsp    = parseInt(row[15]   ?? -1); // SubtotalTipoEspecie
 
-    if (!comitente || IGNORAR_T.has(ticker)) return;
+    if (!comitente || IGNORAR.has(ticker)) return;
+
+    let tickerNorm, tenencia;
+
+    if (TICKER_CASH_ARS.has(ticker)) {
+      // Cash ARS: SubtotalCantidad = 0, usar SubtotalImporte directamente en ARS
+      tickerNorm = 'CASH_ARS';
+      tenencia   = importe;  // ya en ARS
+    } else if (TICKER_CASH_USD.has(ticker)) {
+      // Cash USD: SubtotalCantidad puede tener los dólares, o usar importe/tipoCambio
+      tickerNorm = 'CASH_USD';
+      tenencia   = isFinite(cantidad) && cantidad !== 0
+                   ? cantidad               // DOLARUSA trae cantidad en USD
+                   : importe / tipoCambio;  // "USD" trae importe en ARS → convertir
+    } else {
+      // Activos normales: usar SubtotalCantidad
+      tickerNorm = ticker.toUpperCase();
+      tenencia   = cantidad;
+      if (!isFinite(tenencia) || tenencia === 0) return;
+      if (tenencia < 0) return; // solo positivos para activos
+    }
+
     if (!isFinite(tenencia) || tenencia === 0) return;
-
-    let tickerNorm;
-    if (CASH_ARS_T.has(ticker))      tickerNorm = 'CASH_ARS';
-    else if (CASH_USD_T.has(ticker)) tickerNorm = 'CASH_USD';
-    else                             tickerNorm = ticker.toUpperCase();
-
-    const esCash = tickerNorm === 'CASH_ARS' || tickerNorm === 'CASH_USD';
-    if (!esCash && tenencia < 0) return;
 
     posiciones.push({ alyc: 'IEB', comitente, ticker: tickerNorm, tenencia });
   });
@@ -2438,9 +2459,11 @@ function parseBCCHFile(buf, comitente) {
       return posiciones;
     }
 
-    // ── TABLA 1: Cash (cuenta corriente pesos y dólares) ──
-    // Fila que contiene "Cuenta corriente pesos"  → importe en última celda
-    // Fila que contiene "Cuenta corriente dólares" → "Cantidad USD:XXXX" en col 3
+    // ── TABLA 1: Cash ──
+    // Estructura confirmada:
+    // cells[2] = label, cells[3] = "Cantidad USD:XXX" (solo dólares), cells[5] = importe ARS
+    // "Cuenta corriente pesos"  → importe en cells[5] = "$ 42.967,60"
+    // "Cuenta corriente dólares" → cantidad en cells[3] = "Cantidad USD:-36.542,57"
     const tabla1 = tables[1];
     if (tabla1) {
       tabla1.querySelectorAll('tr').forEach(row => {
@@ -2448,15 +2471,14 @@ function parseBCCHFile(buf, comitente) {
         const label = (cells[2] || '').toLowerCase();
 
         if (label.includes('cuenta corriente pesos')) {
-          // última celda con importe
-          const imp = parseNumBCCH(cells[cells.length - 1]);
+          const imp = parseNumBCCH(cells[5] || cells[cells.length - 1]);
           if (imp !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_ARS', tenencia: imp });
         }
 
-        if (label.includes('cuenta corriente dólares') || label.includes('cuenta corriente dolares')) {
-          // "Cantidad USD:XXXX" está en cells[3]
+        if (label.includes('cuenta corriente') && (label.includes('dólar') || label.includes('dolar'))) {
           const cantCell = cells[3] || '';
-          const match = cantCell.match(/Cantidad USD[:\s]*([-\d.,]+)/i);
+          // "Cantidad USD:-36.542,57" → extraer número
+          const match = cantCell.match(/Cantidad\s+USD[:\s]*([-\d.,]+)/i);
           if (match) {
             const qty = parseNumBCCH(match[1]);
             if (qty !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_USD', tenencia: qty });
@@ -2465,20 +2487,20 @@ function parseBCCHFile(buf, comitente) {
       });
     }
 
-    // ── TABLAS 2 y 3: Posiciones (pesos y dólares) ──
-    // Estructura: col 1 = Ticker, col 3 = Cantidad
-    // Primera fila = header (Ticker, Nombre, Cantidad, ...) → skip
-    // Última fila puede ser "Subtotal" → skip si ticker vacío o contiene "subtotal"
+    // ── TABLAS 2 y 3: Posiciones ──
+    // Estructura confirmada por análisis del archivo real:
+    // cells[0]='' cells[1]=Ticker cells[2]=Nombre cells[3]=Cantidad cells[4]=Precio cells[5]=Importe
+    // Última fila = "Subtotal Pesos" / "Subtotal U$S" → skipear
     for (let t = 2; t <= 3 && t < tables.length; t++) {
       const tabla = tables[t];
       const rows  = [...tabla.querySelectorAll('tr')];
 
-      rows.slice(1).forEach(row => {  // saltar header
-        const cells  = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
-        const ticker = (cells[1] || '').trim().toUpperCase();
-        const cantRaw = cells[3] || '';
+      rows.slice(1).forEach(row => {
+        const cells   = [...row.querySelectorAll('td,th')].map(c => c.textContent.trim());
+        const ticker  = (cells[1] || '').trim().toUpperCase();
+        const cantRaw = (cells[3] || '').trim();
 
-        // Ignorar filas vacías, subtotales o encabezados repetidos
+        // Ignorar vacíos y subtotales
         if (!ticker || /^(ticker|subtotal|total)/i.test(ticker)) return;
 
         const tenencia = parseNumBCCH(cantRaw);
