@@ -2439,48 +2439,102 @@ async function cargarBCCHDesdeCarpeta() {
   }
 }
 
+// ── Helpers BCCH ──
+
+// Parsea workbook XLSX/string-mode de BCCH
+// Estructura: hoja 0=encabezado, hoja 1=resumen cash, hoja 2=pesos, hoja 3=dolares
+function parseBCCHFromWorkbook(wb, comitente) {
+  const posiciones = [];
+
+  // HOJA 1: cash (Cuenta corriente pesos / dólares)
+  const ws1 = wb.Sheets[wb.SheetNames[1]];
+  if (ws1) {
+    const rows1 = XLSX.utils.sheet_to_json(ws1, { defval: '', header: 1 });
+    rows1.forEach(row => {
+      const label = String(row[2] || '').toLowerCase().trim();
+      if (label.includes('cuenta corriente pesos')) {
+        const imp = parseNumBCCH(String(row[5] || row[row.length-1] || ''));
+        if (imp !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_ARS', tenencia: imp });
+      }
+      if (label.includes('cuenta corriente') && (label.includes('dólar') || label.includes('dolar'))) {
+        // cells[3] = "Cantidad USD:-36.542,57"
+        const cantCell = String(row[3] || '');
+        const m = cantCell.match(/Cantidad\s*USD[:\s]*([-\d.,]+)/i);
+        if (m) {
+          const qty = parseNumBCCH(m[1]);
+          if (qty !== 0) posiciones.push({ alyc:'BCCH', comitente, ticker:'CASH_USD', tenencia: qty });
+        }
+      }
+    });
+  }
+
+  // HOJAS 2 y 3: posiciones pesos y dólares
+  for (let h = 2; h <= 3 && h < wb.SheetNames.length; h++) {
+    const ws = wb.Sheets[wb.SheetNames[h]];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
+    rows.slice(1).forEach(row => {
+      const ticker = String(row[1] || '').trim().toUpperCase();
+      const cant   = parseNumBCCH(String(row[3] || ''));
+      if (!ticker || /^(ticker|subtotal|total)/i.test(ticker)) return;
+      if (!isFinite(cant) || cant === 0) return;
+      posiciones.push({ alyc:'BCCH', comitente, ticker, tenencia: cant });
+    });
+  }
+
+  return posiciones;
+}
+
+// Parsea XLS/XLSX binario real de BCCH
+function parseBCCHFromXLSX(buf, comitente) {
+  const wb = XLSX.read(buf, { type: 'array' });
+  if (!wb.SheetNames || wb.SheetNames.length === 0) return [];
+  return parseBCCHFromWorkbook(wb, comitente);
+}
+
 // Parsea un archivo XLS de BCCH (formato HTML disfrazado de XLS)
 // comitente: número extraído del nombre del archivo
 function parseBCCHFile(buf, comitente) {
   const posiciones = [];
 
   try {
-    // Detectar si es HTML o XLSX real mirando los primeros bytes
+    // Detectar formato por magic bytes
     const header = new Uint8Array(buf.slice(0, 4));
-    const isPK   = header[0] === 0x50 && header[1] === 0x4B; // ZIP/XLSX magic
-    const isCFB  = header[0] === 0xD0 && header[1] === 0xCF; // OLE2/XLS binario
+    const isPK   = header[0] === 0x50 && header[1] === 0x4B; // ZIP → XLSX
+    const isCFB  = header[0] === 0xD0 && header[1] === 0xCF; // OLE2 → XLS binario
 
     if (isPK || isCFB) {
-      // Es un Excel real — usar XLSX.js
-      log(`  ℹ BCCH ${comitente}: Excel real, usando XLSX`, 'log-ok');
-      const wb = XLSX.read(buf, { type: 'array' });
-      if (!wb.SheetNames || wb.SheetNames.length === 0) return posiciones;
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
-      // Intentar parsear como tabla genérica buscando columnas Ticker + Cantidad
-      rows.slice(1).forEach(row => {
-        const ticker = String(row[1] || '').trim().toUpperCase();
-        const cant   = parseNumBCCH(String(row[3] || ''));
-        if (!ticker || /^(ticker|subtotal|total)/i.test(ticker)) return;
-        if (!isFinite(cant) || cant === 0) return;
-        posiciones.push({ alyc: 'BCCH', comitente, ticker, tenencia: cant });
-      });
-      return posiciones;
+      // Excel binario real → XLSX.js directo
+      log(`  ℹ BCCH ${comitente}: formato Excel binario`, 'log-ok');
+      return parseBCCHFromXLSX(buf, comitente);
     }
 
-    // Es HTML — decodificar eliminando BOM correctamente
-    // ignoreBOM:true hace que TextDecoder descarte EF BB BF automáticamente
+    // HTML disfrazado de XLS → decodificar y parsear con XLSX en modo string
+    // XLSX.js 0.18+ puede leer HTML con tablas usando type:'string'
     const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
-    const html = decoder.decode(buf);
+    const html    = decoder.decode(buf).trim();
 
-    // Parsear HTML con DOMParser (disponible en browser)
+    log(`  ℹ BCCH ${comitente}: HTML detectado, ${(html.match(/<table/gi)||[]).length} tablas`, 'log-ok');
+
+    // Intentar con XLSX string mode (lee todas las tablas HTML)
+    try {
+      const wb = XLSX.read(html, { type: 'string' });
+      if (wb && wb.SheetNames && wb.SheetNames.length >= 2) {
+        log(`  ℹ BCCH ${comitente}: XLSX string mode OK, ${wb.SheetNames.length} hojas`, 'log-ok');
+        return parseBCCHFromWorkbook(wb, comitente);
+      }
+    } catch(xlsxErr) {
+      log(`  ⚠ BCCH ${comitente}: XLSX string mode falló (${xlsxErr.message}), usando DOMParser`, 'log-warn');
+    }
+
+    // Fallback: DOMParser
     const parser = new DOMParser();
     const doc    = parser.parseFromString(html, 'text/html');
     const tables = doc.querySelectorAll('table');
 
-    log(`  ℹ BCCH ${comitente}: HTML parseado, ${tables.length} tablas encontradas`, 'log-ok');
+    log(`  ℹ BCCH ${comitente}: DOMParser → ${tables.length} tablas`, 'log-ok');
     if (tables.length < 2) {
-      log(`⚠ BCCH ${comitente}: estructura inesperada (${tables.length} tablas). Primeros 200 chars: ${html.substring(0,200)}`, 'log-warn');
+      log(`⚠ BCCH ${comitente}: sin tablas suficientes. Inicio: ${html.substring(0,100)}`, 'log-warn');
       return posiciones;
     }
 
