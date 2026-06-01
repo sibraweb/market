@@ -2445,17 +2445,42 @@ function parseBCCHFile(buf, comitente) {
   const posiciones = [];
 
   try {
-    // Decodificar: pueden tener BOM UTF-8
-    const decoder = new TextDecoder('utf-8');
-    const html = decoder.decode(buf).replace(/^﻿/, '');
+    // Detectar si es HTML o XLSX real mirando los primeros bytes
+    const header = new Uint8Array(buf.slice(0, 4));
+    const isPK   = header[0] === 0x50 && header[1] === 0x4B; // ZIP/XLSX magic
+    const isCFB  = header[0] === 0xD0 && header[1] === 0xCF; // OLE2/XLS binario
+
+    if (isPK || isCFB) {
+      // Es un Excel real — usar XLSX.js
+      log(`  ℹ BCCH ${comitente}: Excel real, usando XLSX`, 'log-ok');
+      const wb = XLSX.read(buf, { type: 'array' });
+      if (!wb.SheetNames || wb.SheetNames.length === 0) return posiciones;
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
+      // Intentar parsear como tabla genérica buscando columnas Ticker + Cantidad
+      rows.slice(1).forEach(row => {
+        const ticker = String(row[1] || '').trim().toUpperCase();
+        const cant   = parseNumBCCH(String(row[3] || ''));
+        if (!ticker || /^(ticker|subtotal|total)/i.test(ticker)) return;
+        if (!isFinite(cant) || cant === 0) return;
+        posiciones.push({ alyc: 'BCCH', comitente, ticker, tenencia: cant });
+      });
+      return posiciones;
+    }
+
+    // Es HTML — decodificar eliminando BOM correctamente
+    // ignoreBOM:true hace que TextDecoder descarte EF BB BF automáticamente
+    const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+    const html = decoder.decode(buf);
 
     // Parsear HTML con DOMParser (disponible en browser)
     const parser = new DOMParser();
     const doc    = parser.parseFromString(html, 'text/html');
     const tables = doc.querySelectorAll('table');
 
+    log(`  ℹ BCCH ${comitente}: HTML parseado, ${tables.length} tablas encontradas`, 'log-ok');
     if (tables.length < 2) {
-      log(`⚠ BCCH ${comitente}: estructura inesperada (${tables.length} tablas)`, 'log-warn');
+      log(`⚠ BCCH ${comitente}: estructura inesperada (${tables.length} tablas). Primeros 200 chars: ${html.substring(0,200)}`, 'log-warn');
       return posiciones;
     }
 
