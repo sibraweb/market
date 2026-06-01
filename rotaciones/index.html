@@ -378,6 +378,28 @@ const Auth = {
   }
 };
 
+// ── Diagnóstico en pantalla ──────────────────────────────────
+function mostrarError(titulo, detalle){
+  const c = document.getElementById("content");
+  if(!c) return;
+  c.innerHTML = `
+    <div style="background:#1c0a0a;border:1px solid #7f1d1d;padding:24px;margin:20px 0;max-width:700px">
+      <div style="color:#fca5a5;font-weight:600;font-size:13px;margin-bottom:12px">❌ ${titulo}</div>
+      <div style="color:#f87171;font-size:12px;font-family:monospace;white-space:pre-wrap;line-height:1.6">${detalle}</div>
+      <div style="margin-top:16px;font-size:11px;color:#94a3b8">
+        <strong>Checklist:</strong><br/>
+        1. ¿El CLIENT_ID en el HTML es el correcto de GCP?<br/>
+        2. ¿El OAuth consent screen tiene habilitados los scopes de Drive y Sheets?<br/>
+        3. ¿<code>web.sibra@gmail.com</code> está agregado como Test User en GCP?<br/>
+        4. ¿El nombre de la pestaña en el Sheet de Clientes es exactamente <code>Clientes</code>?<br/>
+        5. ¿La API Key tiene habilitadas Drive API y Sheets API?
+      </div>
+      <button onclick="location.reload()" style="margin-top:16px;background:#450a0a;border:1px solid #dc2626;color:#fca5a5;padding:8px 16px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:11px">
+        ↺ Reintentar
+      </button>
+    </div>`;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  DRIVE API
 // ═══════════════════════════════════════════════════════════════
@@ -386,8 +408,19 @@ const DriveAPI = {
 
   async sheetValues(spreadsheetId, range){
     const url = `${DriveAPI.BASE}/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+    console.log("[Drive] GET", url);
     const r = await fetch(url, {headers: Auth.getHeaders()});
-    if(!r.ok) throw new Error(`Sheets API ${r.status}: ${await r.text()}`);
+    if(!r.ok){
+      const body = await r.text();
+      let parsed; try{ parsed = JSON.parse(body); }catch(e){ parsed = null; }
+      const msg = parsed?.error?.message || body;
+      const status = r.status;
+      console.error(`[Drive] Sheets ${status}:`, msg);
+      if(status===401) throw new Error(`401 — Token expirado o inválido. Cerrá sesión y volvé a entrar.\n\nDetalle: ${msg}`);
+      if(status===403) throw new Error(`403 — Sin permisos. Verificá que:\n• El OAuth consent screen tenga los scopes de Sheets\n• El archivo sea accesible por web.sibra@gmail.com\n\nDetalle: ${msg}`);
+      if(status===404) throw new Error(`404 — Archivo no encontrado. ID: ${spreadsheetId}\nVerificá que el Sheet existe y es accesible.\n\nDetalle: ${msg}`);
+      throw new Error(`Sheets API ${status}: ${msg}`);
+    }
     const d = await r.json();
     return d.values || [];
   },
@@ -395,8 +428,17 @@ const DriveAPI = {
   async listarArchivosEnCarpeta(folderId){
     const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
     const url = `${DriveAPI.BASE}/drive/v3/files?q=${q}&orderBy=modifiedTime+desc&fields=files(id,name,modifiedTime)&pageSize=50`;
+    console.log("[Drive] LIST carpeta", folderId);
     const r = await fetch(url, {headers: Auth.getHeaders()});
-    if(!r.ok) throw new Error(`Drive API ${r.status}`);
+    if(!r.ok){
+      const body = await r.text();
+      let parsed; try{ parsed = JSON.parse(body); }catch(e){ parsed = null; }
+      const msg = parsed?.error?.message || body;
+      const status = r.status;
+      if(status===401) throw new Error(`401 — Token expirado. Cerrá sesión y volvé a entrar.\n\nDetalle: ${msg}`);
+      if(status===403) throw new Error(`403 — Sin permisos para listar carpeta ${folderId}.\nVerificá que Drive API esté habilitada en GCP y los scopes del OAuth.\n\nDetalle: ${msg}`);
+      throw new Error(`Drive API ${status}: ${msg}`);
+    }
     const d = await r.json();
     return d.files || [];
   },
@@ -472,12 +514,12 @@ const DriveAPI = {
 const Precios = {
   async cargarTodos(){
     try{
-      // data912 — probamos el endpoint de precios live
       const url = `${CONFIG.DATA912.BASE_URL}${CONFIG.DATA912.ENDPOINT}`;
-      const r = await fetch(url);
-      if(!r.ok) throw new Error("data912 "+r.status);
+      console.log("[data912] GET", url);
+      const r = await fetch(url, { mode:"cors" });
+      if(!r.ok) throw new Error("HTTP "+r.status);
       const data = await r.json();
-      const items = Array.isArray(data) ? data : (data.data || data.prices || Object.values(data));
+      const items = Array.isArray(data) ? data : (data.data||data.prices||Object.values(data));
       State.precios = {};
       for(const item of items){
         const ticker = String(item.ticker||item.symbol||item.c||item.Ticker||"").trim().toUpperCase();
@@ -486,17 +528,20 @@ const Precios = {
           State.precios[ticker] = esRentaFija(ticker) ? precio/100 : precio;
         }
       }
-      // Tipo de cambio
-      const al30  = State.precios["AL30"];
-      const al30d = State.precios["AL30D"];
-      if(al30 && al30d && al30d>0) State.tipoCambio = al30/al30d;
-      const hora = new Date().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"});
-      document.getElementById("precio-tc").textContent = `TC: $${State.tipoCambio?.toFixed(0)||"—"}`;
-      document.getElementById("precio-hora").textContent = `(${hora})`;
+      const al30=State.precios["AL30"], al30d=State.precios["AL30D"];
+      if(al30&&al30d&&al30d>0) State.tipoCambio=al30/al30d;
+      const hora=new Date().toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"});
+      document.getElementById("precio-tc").textContent=`TC: $${State.tipoCambio?.toFixed(0)||"—"}`;
+      document.getElementById("precio-hora").textContent=`(${hora})`;
+      console.log("[data912] OK —",Object.keys(State.precios).length,"precios. TC:",State.tipoCambio);
       return State.precios;
     }catch(e){
-      console.error("data912 error:",e);
-      showToast("No se pudo conectar a data912 — usando precios de tenencia","error");
+      // CORS o red — no fatal, se usan precios de tenencia
+      console.warn("[data912] No disponible (se usarán precios de tenencia):", e.message);
+      State.precios={};
+      State.tipoCambio=null;
+      const el=document.getElementById("precio-tc");
+      if(el) el.textContent="TC: manual";
       return {};
     }
   },
@@ -697,19 +742,40 @@ const Calculos = {
 // ═══════════════════════════════════════════════════════════════
 const App = {
   async inicializar(){
-    showLoading("Cargando clientes y carteras modelo...");
+    // PASO 1: Drive (crítico)
+    showLoading("Cargando clientes desde Drive...");
     try{
-      await Promise.all([Datos.cargarClientes(), Datos.cargarCarteras()]);
-      showLoading("Cargando precios live...");
-      await Precios.cargarTodos();
-      UI.inicializarSelectores();
-      hideLoading();
-      showToast("Sistema listo");
+      await Datos.cargarClientes();
     }catch(e){
       hideLoading();
-      showToast("Error iniciando: "+e.message,"error");
-      console.error(e);
+      mostrarError("Error cargando clientes desde Drive", e.message);
+      console.error("[inicializar] clientes:", e);
+      return;
     }
+
+    // PASO 2: Carteras modelo (crítico)
+    showLoading("Cargando carteras modelo...");
+    try{
+      await Datos.cargarCarteras();
+    }catch(e){
+      hideLoading();
+      mostrarError("Error cargando carteras modelo desde Drive", e.message);
+      console.error("[inicializar] carteras:", e);
+      return;
+    }
+
+    // PASO 3: Precios live (opcional — si falla CORS se usa precio de tenencia)
+    showLoading("Cargando precios live...");
+    try{
+      await Precios.cargarTodos();
+    }catch(e){
+      console.warn("[inicializar] data912 no disponible, se usarán precios de tenencia:", e.message);
+      document.getElementById("precio-tc").textContent = "TC: sin datos";
+    }
+
+    UI.inicializarSelectores();
+    hideLoading();
+    showToast("Sistema listo (" + State.clientes.length + " clientes)");
   },
 
   async actualizarPrecios(){
