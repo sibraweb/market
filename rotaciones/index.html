@@ -611,46 +611,45 @@ const Datos = {
 
   // ── Tenencia ADCAP ────────────────────────────────────
   _parsearADCAP(rows, cc){
-    // Formato ADCAP (hoja "Reporte"):
-    // - Fila de grupo:  col A = "Dolar 7000" / "Acciones" / etc. (sin separador " - ")
-    // - Fila de ticker: col A = "USD 7000 - Dolar 7000" / "PAMP - Pampa Energía"
-    // - Fila de dato:   col A = número comitente, col B = cantidad, col I = precio ARS, col L = importe
+    // Portado directamente de parseADCAP() en módulo "actual" — probado y funciona
+    // col A (0) = comitente/ticker/grupo; col D (3) = tenencia total; col I (8) = precio; col L (11) = importe
     const ccStr=String(cc).trim();
     let cashPesos=0,cashUSD=0,caucionPesos=0;
     const pos=[];
-    let grupo="", ticker="";
+    const IGNORAR    = /posici[oó]n informativa|posiciones tomadas|colocadas/i;
+    const CASH_ARS_R = /^\$\s*-|^pesos/i;
+    const CASH_USD_R = /dolar\s*7000|dolar\s*mep|dolar\s*cable|usd\s*7000|usd\s*[cdo]\s*-/i;
+    let ticker=null, ignorarBloque=false;
 
     for(const r of rows){
-      const col0=String(r[0]||"").trim();
+      const col0=String(r[0]??'').trim();
       if(!col0) continue;
+      if(IGNORAR.test(col0)){ ignorarBloque=true; ticker=null; continue; }
+      const esNum=!isNaN(col0)&&col0!=='';
 
-      // Fila de dato: col A es número puro
-      if(/^\d+$/.test(col0)){
-        if(col0!==ccStr||!ticker) continue;
-        const cantidad=parseFloat(String(r[1]||"").replace(/[,\s]/g,""))||0;
-        const precio  =parseFloat(String(r[8]||"").replace(/[,\s]/g,""))||0;
-        const importe =parseFloat(String(r[11]||"").replace(/[,\s]/g,""))||0;
-        if(cantidad<=0) continue;
-        const grp=grupo.toLowerCase();
-        if(grp.includes("dolar")||grp.includes("dólar")){
-          cashUSD+=cantidad;
-        } else if(grp.includes("pesos")||grp.includes("efectivo")){
-          cashPesos+=importe;
-        } else {
-          const pu=Precios.get(ticker)||precio;
-          pos.push({ticker,especie:ticker,cantidad,pu,importe:importe||cantidad*pu,esFondo:false});
-        }
+      if(!esNum&&col0.includes(' / ')&&!col0.includes(' - ')){
+        ignorarBloque=false; ticker=null; continue;
+      }
+      if(!esNum&&col0.includes(' - ')){
+        if(ignorarBloque) continue;
+        if(CASH_ARS_R.test(col0))      ticker='CASH_ARS';
+        else if(CASH_USD_R.test(col0)) ticker='CASH_USD';
+        else                           ticker=col0.split(' - ')[0].trim().toUpperCase();
         continue;
       }
-
-      // Fila de ticker: contiene " - " o " – "
-      if(col0.includes(" - ")||col0.includes(" – ")){
-        const sep=col0.includes(" – ")?" – ":" - ";
-        ticker=col0.split(sep)[0].trim().toUpperCase().replace(/\s+/g,"");
-      } else {
-        // Fila de grupo (título de sección)
-        grupo=col0;
-        ticker="";
+      if(esNum&&ticker&&!ignorarBloque&&col0===ccStr){
+        const val=parseFloat(r[3]);
+        if(!isFinite(val)) continue;
+        if(ticker==='CASH_ARS'){
+          if(val<0) caucionPesos=Math.abs(val); else cashPesos+=val;
+        } else if(ticker==='CASH_USD'){
+          cashUSD+=Math.abs(val);
+        } else if(val>0){
+          const precio=parseFloat(r[8])||0;
+          const importe=parseFloat(r[11])||0;
+          const pu=Precios.get(ticker)||precio;
+          pos.push({ticker,especie:ticker,cantidad:val,pu,importe:importe||val*pu,esFondo:false});
+        }
       }
     }
     return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
@@ -1095,7 +1094,7 @@ const UI = {
         ${(()=>{
           const cl=S.clienteActual;
           const tc=S.tipoCambio||0;
-          const caucARS=ten.caucionPesos+(ten.cashUSD>0&&tc>0?ten.cashUSD*tc:0);
+          const caucARS=(cl.caucionPesosFijo||0)+((cl.caucionDolaresFijo||0)*tc);
           const caucPct=totalCartera>0?caucARS/totalCartera:0;
           const plazos=[
             {lbl:"Largo Plazo",  k:"LP",   v:cl.LP},
@@ -1124,7 +1123,6 @@ const UI = {
           <div class="card"><div class="label">Cash pesos</div><div class="value-sm">${fmt(ten.cashPesos)}</div></div>
           <div class="card"><div class="label">Caución tomadora</div><div class="value-sm">${fmt(ten.caucionPesos)}</div></div>
         </div>
-        ${ten.cashUSD>0?`<div class="card" style="margin-bottom:8px"><div class="label">Cash USD</div><div class="value-sm">USD ${fmtN(ten.cashUSD)} ≈ ${fmt(ten.cashUSD*(S.tipoCambio||0))}</div></div>`:""}
         <div class="card" style="margin-bottom:8px">
           <div class="label" style="margin-bottom:8px">Flujos de caja</div>
           <div class="card-grid g2">
