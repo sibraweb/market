@@ -656,6 +656,26 @@ const Datos = {
     return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
   },
 
+  // ── Tenencia ADCAP (HTML disfrazado de XLS) ───────────
+  _parsearADCAPhtml(htmlStr, cc){
+    const doc = new DOMParser().parseFromString(htmlStr,"text/html");
+    // Parsea string numérico en formato argentino (1.234.567,89) o americano
+    const toNum = s => {
+      const str=String(s||"").trim().replace(/[$\s%]/g,"");
+      if(!str) return str;
+      // Formato argentino: tiene punto como miles y coma como decimal
+      if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(str)) return parseFloat(str.replace(/\./g,"").replace(",","."));
+      // Coma como decimal simple: "6,9300"
+      if(/^\d+,\d+$/.test(str)) return parseFloat(str.replace(",","."));
+      return parseFloat(str.replace(/,/g,""))||str;
+    };
+    const rows=[];
+    for(const tr of doc.querySelectorAll("tr")){
+      rows.push([...tr.querySelectorAll("td,th")].map(c=>toNum(c.textContent.trim())));
+    }
+    return Datos._parsearADCAP(rows, cc);
+  },
+
   // ── Tenencia BCCH ─────────────────────────────────────
   _parsearBCCH(htmlStr){
     // Números en formato argentino: 1.234.567,89 → hay que invertir sep
@@ -770,14 +790,27 @@ const Datos = {
     }
 
     // IEB y ADCAP: un único archivo con todos los comitentes
-    const buf   = await Drive.bajar(archivos[0].id);
+    const buf = await Drive.bajar(archivos[0].id);
+
+    // Detectar si es HTML disfrazado de XLS (común en ADCAP)
+    const preview = new TextDecoder().decode(buf.slice(0,200)).toLowerCase();
+    const esHTML  = preview.includes("<html") || preview.includes("<!doctype");
+
+    if(alyc==="ADCAP"){
+      if(esHTML){
+        const htmlStr = new TextDecoder().decode(buf);
+        return Datos._parsearADCAPhtml(htmlStr, cc);
+      }
+      const hojas = Drive.leerXlsx(buf);
+      const nombreHoja = Object.keys(hojas).find(n=>n.toLowerCase().includes("reporte")||n==="Sheet1")||Object.keys(hojas)[0];
+      return Datos._parsearADCAP(hojas[nombreHoja]||[], cc);
+    }
+
     const hojas = Drive.leerXlsx(buf);
-    // Buscar la hoja con datos (la que tiene "Comitente" o "Reporte")
     const nombreHoja = Object.keys(hojas).find(n=>n.toLowerCase().includes("reporte")||n==="Sheet1")||Object.keys(hojas)[0];
     const rows = hojas[nombreHoja]||[];
 
     if(alyc==="IEB") return Datos._parsearIEB(rows, cc);
-    if(alyc==="ADCAP") return Datos._parsearADCAP(rows, cc);
 
     // Fallback genérico igual a IEB
     return Datos._parsearIEB(rows, cc);
