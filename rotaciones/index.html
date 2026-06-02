@@ -605,39 +605,46 @@ const Datos = {
 
   // ── Tenencia ADCAP ────────────────────────────────────
   _parsearADCAP(rows, cc){
-    // Formato ADCAP: hoja "Reporte", múltiples comitentes
-    // Columna 0: "TICKER - CANT / NOMBRE" o "$- Pesos" o "USD 7000 - Dolar 7000"
-    // Columna 1: cc del comitente (en fila header del bloque)
-    // Columna 3: cantidad/importe
+    // Formato ADCAP (hoja "Reporte"):
+    // - Fila de grupo:  col A = "Dolar 7000" / "Acciones" / etc. (sin separador " - ")
+    // - Fila de ticker: col A = "USD 7000 - Dolar 7000" / "PAMP - Pampa Energía"
+    // - Fila de dato:   col A = número comitente, col B = cantidad, col I = precio ARS, col L = importe
+    const ccStr=String(cc).trim();
     let cashPesos=0,cashUSD=0,caucionPesos=0;
     const pos=[];
-    let enComitente=false;
-    const ccStr=String(cc).trim();
+    let grupo="", ticker="";
 
     for(const r of rows){
       const col0=String(r[0]||"").trim();
-      const col1=String(r[1]||"").trim();
-      const col3=parseFloat(String(r[3]||"").replace(/[$,\s]/g,""))||0;
+      if(!col0) continue;
 
-      // Detectar inicio de bloque de comitente
-      if(col1===ccStr){ enComitente=true; continue; }
-      // Detectar fin de bloque (nuevo CC)
-      if(enComitente && col1 && col1!==ccStr && /^\d+$/.test(col1)){ break; }
-      if(!enComitente) continue;
+      // Fila de dato: col A es número puro
+      if(/^\d+$/.test(col0)){
+        if(col0!==ccStr||!ticker) continue;
+        const cantidad=parseFloat(String(r[1]||"").replace(/[,\s]/g,""))||0;
+        const precio  =parseFloat(String(r[8]||"").replace(/[,\s]/g,""))||0;
+        const importe =parseFloat(String(r[11]||"").replace(/[,\s]/g,""))||0;
+        if(cantidad<=0) continue;
+        const grp=grupo.toLowerCase();
+        if(grp.includes("dolar")||grp.includes("dólar")){
+          cashUSD+=cantidad;
+        } else if(grp.includes("pesos")||grp.includes("efectivo")){
+          cashPesos+=importe;
+        } else {
+          const pu=Precios.get(ticker)||precio;
+          pos.push({ticker,especie:ticker,cantidad,pu,importe:importe||cantidad*pu,esFondo:false});
+        }
+        continue;
+      }
 
-      if(col0.toLowerCase().includes("pesos")||col0.startsWith("$")){
-        if(col3<0) caucionPesos=Math.abs(col3); else cashPesos=col3; continue;
-      }
-      if(col0.toLowerCase().includes("dolar")||col0.toLowerCase().includes("usd")){
-        cashUSD=col3; continue;
-      }
-      // Ticker: "PAMP - 457 / PAMPA ENERGIA" → ticker=PAMP, cant=457
-      const m = col0.match(/^([A-Z0-9]+)\s*[–\-]\s*([\d.,]+)/);
-      if(m){
-        const ticker=m[1].toUpperCase();
-        const cant=parseFloat(m[2].replace(/,/g,""))||col3;
-        const pu = Precios.get(ticker)||0;
-        if(cant>0) pos.push({ticker,especie:col0,cantidad:cant,pu,importe:cant*pu,esFondo:false});
+      // Fila de ticker: contiene " - " o " – "
+      if(col0.includes(" - ")||col0.includes(" – ")){
+        const sep=col0.includes(" – ")?" – ":" - ";
+        ticker=col0.split(sep)[0].trim().toUpperCase().replace(/\s+/g,"");
+      } else {
+        // Fila de grupo (título de sección)
+        grupo=col0;
+        ticker="";
       }
     }
     return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
