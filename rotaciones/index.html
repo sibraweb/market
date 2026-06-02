@@ -212,6 +212,7 @@ const CFG = {
     CARPETA_PAPELES:     "1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI",
     CARPETA_ROTACIONES:  "1ShrZydkIEtROBZ--lObPLdVhidtBebXT",
     CARPETA_RESULTANTES: "1px9T_7kJXX2qnTiLJHIMlThlYaISAN9h",
+    CARPETA_PROPUESTAS:  "1u8Sa-7Hi9aAf1oR-YB4bHu97P0zF1FYx",
     ALYCS: {
       ADCAP:  "1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2",
       IEB:    "16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ",
@@ -232,7 +233,7 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 const S = {
   token: null, usuario: null,
-  clientes: [], carteras: {}, precios: {}, tipoCambio: null,
+  clientes: [], carteras: {}, propuestas: {}, precios: {}, tipoCambio: null,
   alycSel: null, clienteActual: null, tenencia: null, objetivo: {},
   tab: "inicial",
   aporteARS: 0, aporteUSD: 0,
@@ -537,6 +538,35 @@ const Datos = {
     return S.carteras;
   },
 
+  // ── Propuestas (cartera objetivo por comitente) ───────
+  async cargarPropuestas(){
+    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_PROPUESTAS);
+    const xlsx = archivos[0];
+    if(!xlsx) throw new Error("No se encontró archivo de propuestas en Drive");
+    const buf   = await Drive.bajar(xlsx.id);
+    const hojas = Drive.leerXlsx(buf);
+    const hoja  = Object.values(hojas)[0] || [];
+    const header = hoja[0] || [];
+    const iCC     = header.findIndex(h => String(h||"").trim() === "Cuenta Comitente");
+    const iTicker = header.findIndex(h => String(h||"").trim() === "Ticker");
+    const iPct    = header.findIndex(h => String(h||"").trim() === "% Final");
+    if(iCC < 0 || iTicker < 0 || iPct < 0)
+      throw new Error("Formato inesperado en archivo de propuestas (faltan columnas)");
+    S.propuestas = {};
+    for(let i = 1; i < hoja.length; i++){
+      const row    = hoja[i];
+      const cc     = String(row[iCC]    || "").trim();
+      const ticker = String(row[iTicker]|| "").trim().toUpperCase();
+      const v      = parseFloat(row[iPct]) || 0;
+      const pct    = v > 1 ? v / 100 : v;
+      if(!cc || !ticker || pct <= 0) continue;
+      if(!S.propuestas[cc]) S.propuestas[cc] = {};
+      S.propuestas[cc][ticker] = pct;
+    }
+    console.log("[Propuestas] CCs:", Object.keys(S.propuestas).length, "— archivo:", xlsx.name);
+    return S.propuestas;
+  },
+
   // ── Tenencia IEB ──────────────────────────────────────
   _parsearIEB(rows, cc){
     const ccStr = String(cc).trim();
@@ -746,15 +776,7 @@ const Datos = {
 // ══════════════════════════════════════════════════════
 const Calc = {
   objetivo(cliente){
-    const perfil = cliente.perfil||"AGRESIVO";
-    const filas  = S.carteras[perfil]||[];
-    const pesos  = {LARGO:cliente.LP,MEDIO:cliente.MP,CORTO:cliente.CP,CASH:cliente.CASH};
-    const mapa   = {};
-    for(const f of filas){
-      const p=pesos[f.plazo]||0; if(!p||!f.pond_plazo) continue;
-      mapa[f.ticker]=(mapa[f.ticker]||0)+p*f.pond_plazo;
-    }
-    return mapa;
+    return { ...(S.propuestas[String(cliente.cc).trim()] || {}) };
   },
 
   base(ten, aporteARS, aporteUSD, palanca){
@@ -838,9 +860,9 @@ const App = {
     try{ await Datos.cargarClientes(); }
     catch(e){ hideLoad(); errBox("Error cargando clientes",e.message); return; }
 
-    showLoad("Cargando carteras modelo...");
-    try{ await Datos.cargarCarteras(); }
-    catch(e){ hideLoad(); errBox("Error cargando carteras",e.message); return; }
+    showLoad("Cargando propuestas...");
+    try{ await Datos.cargarPropuestas(); }
+    catch(e){ hideLoad(); errBox("Error cargando propuestas",e.message); return; }
 
     showLoad("Cargando precios live...");
     await Precios.cargarTodos(); // no-fatal
