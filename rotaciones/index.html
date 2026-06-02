@@ -364,7 +364,13 @@ const Drive = {
 
   async bajar(fileId){
     const r = await fetch(`${Drive.BASE}/drive/v3/files/${fileId}?alt=media`,{headers:{"Authorization":"Bearer "+S.token}});
-    if(!r.ok){ const t=await r.text(); throw new Error(`Drive descarga ${r.status}: ${t}`); }
+    if(!r.ok){
+      // Google Sheets nativos no se pueden bajar con alt=media → exportar como xlsx
+      const xlsx="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      const r2 = await fetch(`${Drive.BASE}/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(xlsx)}`,{headers:{"Authorization":"Bearer "+S.token}});
+      if(!r2.ok){ const t=await r2.text(); throw new Error(`Drive descarga ${r.status}: ${t}`); }
+      return r2.arrayBuffer();
+    }
     return r.arrayBuffer();
   },
 
