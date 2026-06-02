@@ -1053,6 +1053,33 @@ const UI = {
     <div class="grid2">
       <div>
         <div class="section-title">${S.clienteActual.cliente} · ${S.clienteActual.cc} · ${S.clienteActual.alyc}</div>
+        ${(()=>{
+          const cl=S.clienteActual;
+          const tc=S.tipoCambio||0;
+          const caucARS=ten.caucionPesos+(ten.cashUSD>0&&tc>0?ten.cashUSD*tc:0);
+          const caucPct=totalCartera>0?caucARS/totalCartera:0;
+          const plazos=[
+            {lbl:"Largo Plazo",  k:"LP",   v:cl.LP},
+            {lbl:"Mediano Plazo",k:"MP",   v:cl.MP},
+            {lbl:"Corto Plazo",  k:"CP",   v:cl.CP},
+            {lbl:"Cash",         k:"CASH", v:cl.CASH},
+            {lbl:"Palanca",      k:"PAL",  v:cl.palanca},
+          ];
+          return `
+        <div class="card" style="margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:10px;font-weight:700;letter-spacing:1px;background:var(--red);color:#fff;padding:3px 10px">${cl.perfil}</span>
+            ${caucARS>0?`<span style="font-size:10px;color:var(--text3)">Caución actual: <b style="color:var(--text)">${fmt(caucARS)}</b> · <b style="color:var(--text)">${pct(caucPct)}</b> de la cartera</span>`:""}
+          </div>
+          <div class="card-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
+            ${plazos.map(p=>`<div style="background:var(--bg3);border:1px solid var(--border);padding:8px;text-align:center">
+              <div style="font-size:9px;color:var(--text3);letter-spacing:1px;margin-bottom:4px">${p.lbl}</div>
+              <div style="font-size:13px;font-weight:700;color:var(--text)">${pct(p.v)}</div>
+              <div style="font-size:10px;color:var(--text2);margin-top:2px">${fmt(totalCartera*p.v)}</div>
+            </div>`).join("")}
+          </div>
+        </div>`;
+        })()}
         <div class="card-grid g3">
           <div class="card"><div class="label">Total cartera</div><div class="value" style="font-size:13px">${fmt(totalCartera)}</div></div>
           <div class="card"><div class="label">Cash pesos</div><div class="value-sm">${fmt(ten.cashPesos)}</div></div>
