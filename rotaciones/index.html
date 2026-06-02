@@ -176,6 +176,7 @@ tr:hover td{background:#0d1117}
         <div class="autocomplete-dropdown" id="drop-com" style="display:none"></div>
       </div>
       <button class="btn btn-ghost" style="padding:6px 14px;font-size:10px" onclick="App.pasarSinOperar()">Pasar sin operar →</button>
+      <button class="btn btn-red" style="padding:6px 14px;font-size:10px" onclick="Datos.cargarTodasLasTenencias()">⬇ Cargar tenencias</button>
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
         <span id="precio-tc" style="font-size:10px;color:var(--text3)">TC: —</span>
         <span id="precio-hora" style="font-size:10px;color:var(--text3)"></span>
@@ -234,6 +235,7 @@ const CFG = {
 const S = {
   token: null, usuario: null,
   clientes: [], carteras: {}, propuestas: {}, precios: {}, tipoCambio: null,
+  tenencias: {},   // { cc: { cashPesos, cashUSD, caucionPesos, posiciones } }
   alycSel: null, clienteActual: null, tenencia: null, objetivo: {},
   tab: "inicial",
   aporteARS: 0, aporteUSD: 0,
@@ -571,6 +573,66 @@ const Datos = {
     }
     console.log("[Propuestas] CCs:", Object.keys(S.propuestas).length, "— archivo:", xlsx.name);
     return S.propuestas;
+  },
+
+  // ── Cargar TODAS las tenencias de una vez ─────────────
+  async cargarTodasLasTenencias(){
+    S.tenencias={};
+    const alycsSinBCCH = [...new Set(S.clientes.filter(c=>c.alyc!=='BCCH').map(c=>c.alyc))];
+    const alycsBCCH    = S.clientes.filter(c=>c.alyc==='BCCH');
+
+    // ADCAP / IEB: un archivo con todos los comitentes → descargar una vez
+    for(const alyc of alycsSinBCCH){
+      const fId=CFG.DRIVE.ALYCS[alyc]; if(!fId) continue;
+      showLoad(`Descargando tenencias ${alyc}...`);
+      try{
+        const archivos=await Drive.listar(fId);
+        if(!archivos.length){ console.warn(`Sin archivos para ${alyc}`); continue; }
+        const buf=await Drive.bajar(archivos[0].id);
+        const preview=new TextDecoder().decode(buf.slice(0,200)).toLowerCase();
+        const esHTML=preview.includes('<html')||preview.includes('<!doctype');
+        let rows;
+        if(esHTML){
+          const doc=new DOMParser().parseFromString(new TextDecoder().decode(buf),'text/html');
+          const toNum=s=>{const str=String(s||'').trim().replace(/[$\s%]/g,'');if(!str)return str;if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(str))return parseFloat(str.replace(/\./g,'').replace(',','.'));if(/^\d+,\d+$/.test(str))return parseFloat(str.replace(',','.'));return parseFloat(str.replace(/,/g,''))||str;};
+          rows=[...doc.querySelectorAll('tr')].map(tr=>[...tr.querySelectorAll('td,th')].map(c=>toNum(c.textContent.trim())));
+        } else {
+          const hojas=Drive.leerXlsx(buf);
+          const h=Object.keys(hojas).find(n=>/reporte/i.test(n))||Object.keys(hojas)[0];
+          rows=hojas[h]||[];
+        }
+        // Parsear para cada cliente de esta ALYC
+        const clsAlyc=S.clientes.filter(c=>c.alyc===alyc);
+        for(const cl of clsAlyc){
+          try{ S.tenencias[cl.cc]=Datos._parsearADCAP(rows,cl.cc); }
+          catch(e){ console.warn(`[${alyc}] Error parseando ${cl.cc}:`,e); }
+        }
+        console.log(`[${alyc}] ${clsAlyc.length} comitentes parseados`);
+      }catch(e){ console.error(`[${alyc}] Error:`,e.message); toast(`Error cargando ${alyc}: ${e.message}`,'error'); }
+    }
+
+    // BCCH: un archivo por comitente
+    if(alycsBCCH.length){
+      showLoad('Descargando tenencias BCCH...');
+      const fId=CFG.DRIVE.ALYCS['BCCH'];
+      try{
+        const archivos=await Drive.listar(fId);
+        for(const cl of alycsBCCH){
+          const f=archivos.find(a=>a.name.startsWith(String(cl.cc)));
+          if(!f){ console.warn(`Sin tenencia BCCH para ${cl.cc}`); continue; }
+          try{
+            const buf=await Drive.bajar(f.id);
+            S.tenencias[cl.cc]=Datos._parsearBCCH(new TextDecoder().decode(buf));
+          }catch(e){ console.warn(`[BCCH] Error ${cl.cc}:`,e.message); }
+        }
+        console.log(`[BCCH] ${alycsBCCH.length} comitentes procesados`);
+      }catch(e){ console.error('[BCCH] Error:',e.message); toast('Error cargando BCCH: '+e.message,'error'); }
+    }
+
+    hideLoad();
+    const n=Object.keys(S.tenencias).length;
+    toast(`✓ ${n} tenencias cargadas`);
+    return S.tenencias;
   },
 
   // ── Tenencia IEB ──────────────────────────────────────
@@ -928,11 +990,19 @@ const App = {
     S.aporteARS=0; S.aporteUSD=0; S.palancaAjuste=null;
     S.pctV={}; S.pctC={}; S.tenencia=null;
     S.objetivo=Calc.objetivo(cliente);
+    // Usar caché si ya se cargaron todas las tenencias
+    if(S.tenencias[cliente.cc]){
+      const ten=S.tenencias[cliente.cc];
+      ten.posiciones=ten.posiciones.map(p=>({...p,pu:Precios.get(p.ticker)||p.pu}));
+      S.tenencia=ten;
+      UI.setTab("inicial"); App.render();
+      return;
+    }
     showLoad(`Cargando tenencia de ${cliente.cliente}...`);
     try{
       const ten=await Datos.cargarTenencia(cliente.alyc,cliente.cc);
-      // Enriquecer PU con precios live
       ten.posiciones=ten.posiciones.map(p=>({...p,pu:Precios.get(p.ticker)||p.pu}));
+      S.tenencias[cliente.cc]=ten;
       S.tenencia=ten; hideLoad();
       UI.setTab("inicial"); App.render();
     }catch(e){
