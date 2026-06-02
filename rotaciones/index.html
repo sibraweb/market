@@ -811,9 +811,10 @@ const Calc = {
     });
   },
 
-  disponible(ventas, ten, aARS, aUSD){
+  disponible(ventas, ten, aARS, aUSD, totalAjustado, palanca){
     const tc=S.tipoCambio||0;
-    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+ten.cashPesos+aARS+(aUSD*tc);
+    const prestamo=(totalAjustado||0)*(palanca||0);
+    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+ten.cashPesos+aARS+(aUSD*tc)+prestamo;
   },
 
   compras(ten, ventas, obj, base, pctC, comC, gasC){
@@ -906,7 +907,7 @@ const App = {
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual.palanca||0);
     const {totalCartera,totalAjustado,base}=Calc.base(S.tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(S.tenencia,S.objetivo,base,S.pctV,S.comV,S.gasV);
-    const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD);
+    const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,totalAjustado,palanca);
     const compras=Calc.compras(S.tenencia,ventas,S.objetivo,base,S.pctC,S.comC,S.gasC);
     const {nec,saldo,ok}=Calc.saldo(disp,compras);
     UI.renderInicial(ventas,totalCartera,totalAjustado,base,disp,palanca);
@@ -917,9 +918,9 @@ const App = {
     const {clienteActual:cl,alycSel:alyc,tenencia,objetivo}=S;
     if(!cl||!tenencia) return;
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
-    const {base}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
+    const {base,totalAjustado}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,objetivo,base,S.pctV,S.comV,S.gasV);
-    const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD);
+    const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD,totalAjustado,palanca);
     const compras=Calc.compras(tenencia,ventas,objetivo,base,S.pctC,S.comC,S.gasC);
     const {ok}=Calc.saldo(disp,compras);
     if(!ok){ toast("Saldo insuficiente","error"); return; }
