@@ -926,8 +926,7 @@ function parseIEB(buf) {
   const rows=XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
   const CASH_ARS=new Set(['Pesos','PESOS','$']);
   const CASH_USD_EXT=new Set(['DOLAR EXT.','DOLAR EXT','DOLAREXT','USD EXT','USD C','USDC','DOLAR CABLE','DÓLARES EXT.']);
-  const CASH_USD_MEP=new Set(['USD D','USD MEP','DOLAR MEP','DÓLAR MEP','USDD','USD DÓLAR','USD BOLSA']);
-  const CASH_USD=new Set(['USD','DOLARUSA','DÓLAR','DOLAR']);
+  const CASH_USD=new Set(['USD','DOLARUSA','DÓLAR','DOLAR','USD D','USD MEP','DOLAR MEP','DÓLAR MEP','USDD']);
   const pos=[];
   rows.slice(1).forEach(row=>{
     if(!row) return;
@@ -936,7 +935,7 @@ function parseIEB(buf) {
     const tenencia=parseFloat(row[8]);
     if(!comitente||!ticker||ticker==='-') return;
     if(!isFinite(tenencia)||tenencia===0) return;
-    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD_EXT.has(ticker)?'CASH_USD_EXT':CASH_USD_MEP.has(ticker)?'CASH_USD_MEP':CASH_USD.has(ticker)?'CASH_USD_7000':ticker.toUpperCase();
+    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD_EXT.has(ticker)?'CASH_USD_EXT':CASH_USD.has(ticker)?'CASH_USD_MEP':ticker.toUpperCase();
     if(!t.startsWith('CASH_')&&tenencia<0) return;
     pos.push({alyc:'IEB',comitente,ticker:t,tenencia});
   });
@@ -960,7 +959,7 @@ function parseBCCH(buf,comitente) {
         if(m){
           const q=pn(m[1]);
           const isExt=/ext|exterior|cable/i.test(label);
-          if(q!==0) pos.push({alyc:'BCCH',comitente,ticker:isExt?'CASH_USD_EXT':'CASH_USD_7000',tenencia:q});
+          if(q!==0) pos.push({alyc:'BCCH',comitente,ticker:isExt?'CASH_USD_EXT':'CASH_USD_MEP',tenencia:q});
         }
       }
     });
