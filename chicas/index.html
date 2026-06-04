@@ -208,6 +208,8 @@ tr.row-sent td { opacity:.4; }
   <div class="nav-tab active" data-tab="datos">Fuentes de datos</div>
   <div class="nav-tab" data-tab="ventas">Ventas</div>
   <div class="nav-tab" data-tab="compras">Compras</div>
+  <div class="nav-tab" data-tab="negativos">Saldos negativos</div>
+  <div class="nav-tab" data-tab="exterior">Dólares exterior</div>
   <div class="nav-tab" data-tab="historial">Historial del día</div>
 </nav>
 
@@ -387,6 +389,20 @@ tr.row-sent td { opacity:.4; }
   </div>
 </div>
 
+<!-- ══ PANEL: SALDOS NEGATIVOS ══ -->
+<div class="panel" id="panel-negativos">
+  <div class="sec-title">Saldos negativos en pesos o dólares</div>
+  <p style="font-size:11px;color:var(--text3);margin-bottom:16px">Cuentas con saldo negativo en cualquier moneda — enviar a la mesa para corrección.</p>
+  <div id="negativosBody"><div class="empty-state"><div class="es-icon">⚠️</div><p>Cargá los datos primero</p></div></div>
+</div>
+
+<!-- ══ PANEL: DÓLARES EXTERIOR ══ -->
+<div class="panel" id="panel-exterior">
+  <div class="sec-title">Tenencias en dólares exterior (Cable)</div>
+  <p style="font-size:11px;color:var(--text3);margin-bottom:16px">Cuentas con USD Cable — candidatas a conversión a MEP o Dólar 7000.</p>
+  <div id="exteriorBody"><div class="empty-state"><div class="es-icon">💵</div><p>Cargá los datos primero</p></div></div>
+</div>
+
 <!-- ══ PANEL: HISTORIAL ══ -->
 <div class="panel" id="panel-historial">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
@@ -494,6 +510,8 @@ function initNav() {
       t.classList.add('active');
       $('panel-'+t.dataset.tab).classList.add('active');
       if(t.dataset.tab==='historial') renderHistorial();
+      if(t.dataset.tab==='negativos') renderNegativoss();
+      if(t.dataset.tab==='exterior')  renderExterior();
     });
   });
 }
@@ -860,7 +878,9 @@ function parseADCAP(buf) {
   const pos=[]; let cur=null; let ignorar=false;
   const IGNORAR=/posici[oó]n informativa|posiciones tomadas|colocadas/i;
   const CASH_ARS=/^\$\s*-|^pesos/i;
-  const CASH_USD=/dolar\s*7000|dolar\s*mep|dolar\s*cable|usd/i;
+  const CASH_7000=/dolar\s*7000|usd\s*7000/i;
+  const CASH_MEP=/dolar\s*mep|usd\s*d\s*-|usd\s*d$/i;
+  const CASH_EXT=/dolar\s*cable|dolar\s*(ext|exterior)|usd\s*c\s*-|usd\s*c$/i;
   rows.forEach(row=>{
     const c0=String(row[0]??'').trim();
     if(!c0) return;
@@ -869,14 +889,16 @@ function parseADCAP(buf) {
     if(!esNum&&c0.includes(' / ')&&!c0.includes(' - ')){ignorar=false;cur=null;return;}
     if(!esNum&&c0.includes(' - ')){
       if(ignorar) return;
-      if(CASH_ARS.test(c0)) cur='CASH_ARS';
-      else if(CASH_USD.test(c0)) cur='CASH_USD';
+      if(CASH_ARS.test(c0))  cur='CASH_ARS';
+      else if(CASH_EXT.test(c0)) cur='CASH_USD_EXT';
+      else if(CASH_MEP.test(c0)) cur='CASH_USD_MEP';
+      else if(CASH_7000.test(c0)) cur='CASH_USD_7000';
       else cur=c0.split(' - ')[0].trim().toUpperCase();
       return;
     }
     if(esNum&&cur&&!ignorar){
       const t=parseFloat(row[3]);
-      const esCash=cur==='CASH_ARS'||cur==='CASH_USD';
+      const esCash=cur.startsWith('CASH_');
       if(isFinite(t)&&(esCash?t!==0:t>0)) pos.push({alyc:'ADCAP',comitente:normCC(c0),ticker:cur,tenencia:t});
     }
   });
@@ -887,7 +909,8 @@ function parseIEB(buf) {
   const ws=wb.Sheets[wb.SheetNames[0]];
   const rows=XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
   const CASH_ARS=new Set(['Pesos','PESOS','$']);
-  const CASH_USD=new Set(['USD','DOLARUSA','DOLAR EXT.','DÓLAR','DOLAR']);
+  const CASH_USD_EXT=new Set(['DOLAR EXT.','DOLAR EXT','DOLAREXT','USD EXT']);
+  const CASH_USD=new Set(['USD','DOLARUSA','DÓLAR','DOLAR']);
   const pos=[];
   rows.slice(1).forEach(row=>{
     if(!row) return;
@@ -896,8 +919,8 @@ function parseIEB(buf) {
     const tenencia=parseFloat(row[8]);
     if(!comitente||!ticker||ticker==='-') return;
     if(!isFinite(tenencia)||tenencia===0) return;
-    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD.has(ticker)?'CASH_USD':ticker.toUpperCase();
-    if(t!=='CASH_ARS'&&t!=='CASH_USD'&&tenencia<0) return;
+    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD_EXT.has(ticker)?'CASH_USD_EXT':CASH_USD.has(ticker)?'CASH_USD_7000':ticker.toUpperCase();
+    if(!t.startsWith('CASH_')&&tenencia<0) return;
     pos.push({alyc:'IEB',comitente,ticker:t,tenencia});
   });
   return pos;
@@ -972,14 +995,25 @@ function actualizarSelectores() {
 // ═══════════════════════════════════════════
 //  TICKER SEARCH — VENTAS (multi)
 // ═══════════════════════════════════════════
+const CASH_TICKERS=[
+  {ticker:'CASH_ARS',     label:'Pesos (ARS)'},
+  {ticker:'CASH_USD_7000',label:'Dólar 7000'},
+  {ticker:'CASH_USD_MEP', label:'Dólar MEP'},
+  {ticker:'CASH_USD_EXT', label:'Dólar Cable / Exterior'},
+];
 function getTickerList(q) {
   const counts={};
   posiciones.forEach(p=>{
-    if(p.ticker==='CASH_ARS'||p.ticker==='CASH_USD') return;
+    if(p.ticker.startsWith('CASH_')) return;
     counts[p.ticker]=(counts[p.ticker]||0)+1;
   });
   const q2=(q||'').toUpperCase().trim();
-  return Object.entries(counts).filter(([t])=>!q2||t.includes(q2)).sort((a,b)=>b[1]-a[1]);
+  // Cash tickers al principio si coinciden con la búsqueda
+  const cashItems=CASH_TICKERS
+    .filter(c=>!q2||c.ticker.includes(q2)||c.label.toUpperCase().includes(q2))
+    .map(c=>[c.ticker+'|'+c.label, posiciones.filter(p=>p.ticker===c.ticker).length]);
+  const secItems=Object.entries(counts).filter(([t])=>!q2||t.includes(q2)).sort((a,b)=>b[1]-a[1]);
+  return [...cashItems,...secItems];
 }
 
 function onVentaTickerInput(){ openVentaTickerDrop(); }
@@ -988,11 +1022,12 @@ function openVentaTickerDrop() {
   const items=getTickerList(q).filter(([t])=>!ventaTickers.has(t));
   const drop=$('ventaTickerDrop');
   if(!items.length){drop.classList.remove('open');return;}
-  drop.innerHTML=items.slice(0,30).map(([t,n])=>`
-    <div class="ticker-item" onclick="agregarVentaTicker('${t}')">
-      <span class="ti-sym">${t}</span>
-      <span class="ti-count">${n} cliente${n!==1?'s':''}</span>
-    </div>`).join('');
+  drop.innerHTML=items.slice(0,30).map(([t,n])=>{
+    const [sym,lbl]=t.includes('|')?t.split('|'):[t,t];
+    return `<div class="ticker-item" onclick="agregarVentaTicker('${sym}')">
+      <span class="ti-sym">${lbl||sym}</span>
+      <span class="ti-count">${n} cuenta${n!==1?'s':''}</span>
+    </div>`;}).join('');
   drop.classList.add('open');
 }
 
@@ -1010,12 +1045,14 @@ function quitarVentaTicker(t) {
   renderVentas();
 }
 
+function cashLabel(t){ const c=CASH_TICKERS.find(x=>x.ticker===t); return c?c.label:t; }
 function renderVentaChips() {
   const el=$('ventaTickerChips');
   el.innerHTML=[...ventaTickers].map(t=>{
     const p=getPrice(t);
+    const lbl=cashLabel(t);
     return `<div class="ticker-chip">
-      ${t}
+      ${lbl}
       ${p?`<span class="price">$${fmt(p,2)}</span>`:''}
       <span class="xc" onclick="quitarVentaTicker('${t}')">✕</span>
     </div>`;
@@ -1150,7 +1187,6 @@ function renderVentas() {
   const filas=[];
   posiciones.forEach(p=>{
     if(!ventaTickers.has(p.ticker)) return;
-    if(p.ticker==='CASH_ARS'||p.ticker==='CASH_USD') return;
     if(filterAlyc&&p.alyc!==filterAlyc) return;
     const stock=stockReal(p.alyc,p.comitente,p.ticker);
     if(stock<=0) return;
@@ -1364,6 +1400,51 @@ function resetCompras() { compraTicker=null; compraCants={}; $('compraTickerInpu
 // ═══════════════════════════════════════════
 //  RENDER HISTORIAL
 // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  PANEL: SALDOS NEGATIVOS
+// ═══════════════════════════════════════════
+function renderNegativoss() {
+  const filas=posiciones
+    .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0)
+    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
+    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
+  const el=$('negativosBody');
+  if(!filas.length){
+    el.innerHTML='<div class="empty-state"><div class="es-icon">✅</div><p>Sin saldos negativos</p></div>';
+    return;
+  }
+  el.innerHTML=`<div class="table-wrap"><table>
+    <thead><tr><th>ALyC</th><th>CC</th><th>Cliente</th><th>Moneda</th><th class="td-r">Saldo</th></tr></thead>
+    <tbody>${filas.map(p=>`<tr>
+      <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
+      <td>${cashLabel(p.ticker)}</td>
+      <td class="td-r" style="color:var(--red-light)">${p.ticker==='CASH_ARS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// ═══════════════════════════════════════════
+//  PANEL: DÓLARES EXTERIOR
+// ═══════════════════════════════════════════
+function renderExterior() {
+  const filas=posiciones
+    .filter(p=>p.ticker==='CASH_USD_EXT'&&p.tenencia>0)
+    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
+    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
+  const el=$('exteriorBody');
+  if(!filas.length){
+    el.innerHTML='<div class="empty-state"><div class="es-icon">💵</div><p>Sin tenencias de dólares cable/exterior</p></div>';
+    return;
+  }
+  el.innerHTML=`<div class="table-wrap"><table>
+    <thead><tr><th>ALyC</th><th>CC</th><th>Cliente</th><th class="td-r">USD Cable</th></tr></thead>
+    <tbody>${filas.map(p=>`<tr>
+      <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
+      <td class="td-r" style="color:var(--amber)">U$S ${fmt(p.tenencia,2)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
 function renderHistorial() {
   const hoy=fechaHoy();
   $('histFecha').textContent=`Fecha: ${hoy}`;
