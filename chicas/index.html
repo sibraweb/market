@@ -391,15 +391,31 @@ tr.row-sent td { opacity:.4; }
 
 <!-- ══ PANEL: SALDOS NEGATIVOS ══ -->
 <div class="panel" id="panel-negativos">
-  <div class="sec-title">Saldos negativos en pesos o dólares</div>
-  <p style="font-size:11px;color:var(--text3);margin-bottom:16px">Cuentas con saldo negativo en cualquier moneda — enviar a la mesa para corrección.</p>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+    <div>
+      <div class="sec-title" style="margin:0">Saldos negativos en pesos o dólares</div>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Cuentas con saldo negativo — enviar a la mesa para corrección.</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="negFilterAlyc" class="filter-select" onchange="renderNegativoss()"><option value="">Todas las ALyCs</option></select>
+      <button class="btn btn-secondary btn-sm" onclick="waNegativoss()">📲 WhatsApp</button>
+    </div>
+  </div>
   <div id="negativosBody"><div class="empty-state"><div class="es-icon">⚠️</div><p>Cargá los datos primero</p></div></div>
 </div>
 
 <!-- ══ PANEL: DÓLARES EXTERIOR ══ -->
 <div class="panel" id="panel-exterior">
-  <div class="sec-title">Tenencias en dólares exterior (Cable)</div>
-  <p style="font-size:11px;color:var(--text3);margin-bottom:16px">Cuentas con USD Cable — candidatas a conversión a MEP o Dólar 7000.</p>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+    <div>
+      <div class="sec-title" style="margin:0">Tenencias en dólares exterior (Cable)</div>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Cuentas con USD Cable — candidatas a conversión a MEP o Dólar 7000.</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="extFilterAlyc" class="filter-select" onchange="renderExterior()"><option value="">Todas las ALyCs</option></select>
+      <button class="btn btn-secondary btn-sm" onclick="waExterior()">📲 WhatsApp</button>
+    </div>
+  </div>
   <div id="exteriorBody"><div class="empty-state"><div class="es-icon">💵</div><p>Cargá los datos primero</p></div></div>
 </div>
 
@@ -909,7 +925,8 @@ function parseIEB(buf) {
   const ws=wb.Sheets[wb.SheetNames[0]];
   const rows=XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
   const CASH_ARS=new Set(['Pesos','PESOS','$']);
-  const CASH_USD_EXT=new Set(['DOLAR EXT.','DOLAR EXT','DOLAREXT','USD EXT']);
+  const CASH_USD_EXT=new Set(['DOLAR EXT.','DOLAR EXT','DOLAREXT','USD EXT','USD C','USDC','DOLAR CABLE','DÓLARES EXT.']);
+  const CASH_USD_MEP=new Set(['USD D','USD MEP','DOLAR MEP','DÓLAR MEP','USDD','USD DÓLAR','USD BOLSA']);
   const CASH_USD=new Set(['USD','DOLARUSA','DÓLAR','DOLAR']);
   const pos=[];
   rows.slice(1).forEach(row=>{
@@ -919,7 +936,7 @@ function parseIEB(buf) {
     const tenencia=parseFloat(row[8]);
     if(!comitente||!ticker||ticker==='-') return;
     if(!isFinite(tenencia)||tenencia===0) return;
-    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD_EXT.has(ticker)?'CASH_USD_EXT':CASH_USD.has(ticker)?'CASH_USD_7000':ticker.toUpperCase();
+    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD_EXT.has(ticker)?'CASH_USD_EXT':CASH_USD_MEP.has(ticker)?'CASH_USD_MEP':CASH_USD.has(ticker)?'CASH_USD_7000':ticker.toUpperCase();
     if(!t.startsWith('CASH_')&&tenencia<0) return;
     pos.push({alyc:'IEB',comitente,ticker:t,tenencia});
   });
@@ -991,12 +1008,15 @@ function saldoLiquido(alyc, comitente) {
 // ═══════════════════════════════════════════
 function actualizarSelectores() {
   const alycs=[...new Set(posiciones.map(p=>p.alyc))].sort();
-  ['ventaFilterAlyc','compraFilterAlyc'].forEach(id=>{
+  ['ventaFilterAlyc','compraFilterAlyc','negFilterAlyc','extFilterAlyc'].forEach(id=>{
     const sel=$(id); if(!sel) return;
     const cur=sel.value;
-    sel.innerHTML='<option value="">Todas</option>'+alycs.map(a=>`<option>${a}</option>`).join('');
+    const allLabel=id==='negFilterAlyc'||id==='extFilterAlyc'?'Todas las ALyCs':'Todas';
+    sel.innerHTML=`<option value="">${allLabel}</option>`+alycs.map(a=>`<option>${a}</option>`).join('');
     if(cur) sel.value=cur;
   });
+  renderNegativoss();
+  renderExterior();
 }
 
 // ═══════════════════════════════════════════
@@ -1411,8 +1431,9 @@ function resetCompras() { compraTicker=null; compraCants={}; $('compraTickerInpu
 //  PANEL: SALDOS NEGATIVOS
 // ═══════════════════════════════════════════
 function renderNegativoss() {
+  const alycFil=$('negFilterAlyc')?.value||'';
   const filas=posiciones
-    .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0)
+    .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
     .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
     .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
   const el=$('negativosBody');
@@ -1429,27 +1450,51 @@ function renderNegativoss() {
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
+function waNegativoss() {
+  const alycFil=$('negFilterAlyc')?.value||'';
+  const filas=posiciones
+    .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
+    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
+    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
+  if(!filas.length){alert('Sin saldos negativos para exportar');return;}
+  const titulo=`*Saldos negativos${alycFil?' - '+alycFil:''}*\n`;
+  const lineas=filas.map(p=>`${p.alyc} | ${p.comitente} | ${p.cli} | ${cashLabel(p.ticker)} | ${p.ticker==='CASH_ARS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}`);
+  window.open('https://wa.me/?text='+encodeURIComponent(titulo+lineas.join('\n')));
+}
 
 // ═══════════════════════════════════════════
 //  PANEL: DÓLARES EXTERIOR
 // ═══════════════════════════════════════════
 function renderExterior() {
+  const alycFil=$('extFilterAlyc')?.value||'';
   const filas=posiciones
-    .filter(p=>p.ticker==='CASH_USD_EXT'&&p.tenencia>0)
+    .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
     .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
     .sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
   const el=$('exteriorBody');
   if(!filas.length){
-    el.innerHTML='<div class="empty-state"><div class="es-icon">💵</div><p>Sin tenencias de dólares cable/exterior</p></div>';
+    el.innerHTML='<div class="empty-state"><div class="es-icon">💵</div><p>Sin tenencias de dólares exterior / 7000</p></div>';
     return;
   }
   el.innerHTML=`<div class="table-wrap"><table>
-    <thead><tr><th>ALyC</th><th>CC</th><th>Cliente</th><th class="td-r">USD Cable</th></tr></thead>
+    <thead><tr><th>ALyC</th><th>CC</th><th>Cliente</th><th>Moneda</th><th class="td-r">Saldo USD</th></tr></thead>
     <tbody>${filas.map(p=>`<tr>
       <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
+      <td>${cashLabel(p.ticker)}</td>
       <td class="td-r" style="color:var(--amber)">U$S ${fmt(p.tenencia,2)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
+}
+function waExterior() {
+  const alycFil=$('extFilterAlyc')?.value||'';
+  const filas=posiciones
+    .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
+    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
+    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
+  if(!filas.length){alert('Sin dólares exterior/7000 para exportar');return;}
+  const titulo=`*Dólares exterior / 7000${alycFil?' - '+alycFil:''}*\n`;
+  const lineas=filas.map(p=>`${p.alyc} | ${p.comitente} | ${p.cli} | ${cashLabel(p.ticker)} | U$S ${fmt(p.tenencia,2)}`);
+  window.open('https://wa.me/?text='+encodeURIComponent(titulo+lineas.join('\n')));
 }
 
 function renderHistorial() {
