@@ -145,6 +145,12 @@ td { padding:0 7px; border-bottom:1px solid var(--border); font-size:11px; heigh
 tr:last-child td { border-bottom:none; }
 tr.row-sent td { opacity:.4; }
 .td-r { text-align:right; font-variant-numeric:tabular-nums; }
+/* SORT ICONS */
+th { cursor:pointer; user-select:none; position:relative; }
+th:hover { background:var(--bg4); }
+.sort-icon { display:inline-block; margin-left:3px; font-size:9px; color:var(--text3); }
+.sort-icon.asc::after { content:'⬆'; color:var(--amber); }
+.sort-icon.desc::after { content:'⬇'; color:var(--amber); }
 /* Columna ALYC */ th:nth-child(1), td:nth-child(1) { min-width:42px; padding:0 5px; }
 /* Columna CC */ th:nth-child(2), td:nth-child(2) { min-width:60px; padding:0 5px; }
 /* Columna Cliente */ th:nth-child(3), td:nth-child(3) { min-width:80px; }
@@ -1120,6 +1126,37 @@ function getClienteCarteras(alyc, comitente) {
 }
 
 // ═══════════════════════════════════════════
+//  ORDENAMIENTO DE TABLAS
+// ═══════════════════════════════════════════
+let sortState={field:null,asc:true};
+function handleSort(e,field,table){
+  e.preventDefault();
+  const th=e.target.closest('th');
+  if(!th) return;
+  const allTh=th.parentElement.querySelectorAll('th');
+  allTh.forEach(h=>h.classList.remove('sort-asc','sort-desc'));
+  if(sortState.field===field){sortState.asc=!sortState.asc;}else{sortState.field=field;sortState.asc=true;}
+  if(table==='ventas')renderVentas();
+  else if(table==='compras')renderCompras();
+  else if(table==='negativos')renderNegativoss();
+  else if(table==='exterior')renderExterior();
+  const icon=th.querySelector('.sort-icon');
+  if(icon)icon.className='sort-icon '+(sortState.asc?'asc':'desc');
+}
+function sortRows(rows,field){
+  if(!sortState.field||!field) return rows;
+  return rows.sort((a,b)=>{
+    let aVal=a[sortState.field]??'';
+    let bVal=b[sortState.field]??'';
+    if(typeof aVal==='number'&&typeof bVal==='number')return sortState.asc?aVal-bVal:bVal-aVal;
+    aVal=String(aVal).toLowerCase();
+    bVal=String(bVal).toLowerCase();
+    if(sortState.asc)return aVal.localeCompare(bVal,'es');
+    return bVal.localeCompare(aVal,'es');
+  });
+}
+
+// ═══════════════════════════════════════════
 //  SELECTORES
 // ═══════════════════════════════════════════
 function actualizarSelectores() {
@@ -1343,13 +1380,22 @@ function renderVentas() {
 
   const sent=getSent(SENT_KEY_V);
   // Sort by ticker then comitente
-  filas.sort((a,b)=>a.ticker.localeCompare(b.ticker)||a.comitente.localeCompare(b.comitente));
+  if(!sortState.field) filas.sort((a,b)=>a.ticker.localeCompare(b.ticker)||a.comitente.localeCompare(b.comitente));
+  else filas=sortRows(filas,'alyc');
 
   body.innerHTML=`<div class="table-wrap"><table>
     <thead><tr>
-      <th>ALyC</th><th>CC</th><th>Cliente</th><th>Ticker</th>
-      <th class="td-r">Stock real</th><th class="td-r">Precio spot</th>
-      <th class="td-r">Cantidad a vender</th><th class="td-r">Monto ARS</th><th class="td-r">% neto</th><th class="td-r">% bruto</th><th></th>
+      <th onclick="handleSort(event,'alyc','ventas')">ALyC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'comitente','ventas')">CC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'cliente','ventas')">Cliente<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'ticker','ventas')">Ticker<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'stockReal','ventas')">Stock real<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'precio','ventas')">Precio spot<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'cant','ventas')">Cantidad a vender<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'monto','ventas')">Monto ARS<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'pctNeto','ventas')">% neto<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'pctBruto','ventas')">% bruto<span class="sort-icon"></span></th>
+      <th></th>
     </tr></thead>
     <tbody>
     ${filas.map(p=>{
@@ -1471,7 +1517,8 @@ function renderCompras() {
     filas.push({alyc:p.alyc,comitente:p.comitente,saldo,cantMax});
   });
 
-  filas.sort((a,b)=>b.saldo-a.saldo);
+  if(!sortState.field) filas.sort((a,b)=>b.saldo-a.saldo);
+  else filas=sortRows(filas,'alyc');
 
   if(!filas.length) {
     body.innerHTML='<div class="empty-state"><div class="es-icon">💰</div><p>Ningún cliente tiene saldo líquido disponible</p><small>Realizá ventas primero para generar saldo</small></div>';
@@ -1482,9 +1529,16 @@ function renderCompras() {
 
   body.innerHTML=`<div class="table-wrap"><table>
     <thead><tr>
-      <th>ALyC</th><th>CC</th><th>Cliente</th>
-      <th class="td-r">Saldo ARS</th><th class="td-r">Cant. máx.</th>
-      <th class="td-r">Cantidad a comprar</th><th class="td-r">Monto ARS</th><th class="td-r">% neto</th><th class="td-r">% bruto</th><th></th>
+      <th onclick="handleSort(event,'alyc','compras')">ALyC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'comitente','compras')">CC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'nombre','compras')">Cliente<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'saldo','compras')">Saldo ARS<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'cantMax','compras')">Cant. máx.<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'cant','compras')">Cantidad a comprar<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'monto','compras')">Monto ARS<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'pctNeto','compras')">% neto<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'pctBruto','compras')">% bruto<span class="sort-icon"></span></th>
+      <th></th>
     </tr></thead>
     <tbody>
     ${filas.map(f=>{
@@ -1560,17 +1614,24 @@ function resetCompras() { compraTicker=null; compraCants={}; $('compraTickerInpu
 // ═══════════════════════════════════════════
 function renderNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
-  const filas=posiciones
+  let filas=posiciones
     .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
-    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
+    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}));
+  if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
+  else filas=sortRows(filas,'alyc');
   const el=$('negativosBody');
   if(!filas.length){
     el.innerHTML='<div class="empty-state"><div class="es-icon">✅</div><p>Sin saldos negativos</p></div>';
     return;
   }
   el.innerHTML=`<div class="table-wrap"><table>
-    <thead><tr><th>ALyC</th><th>CC</th><th>Cliente</th><th>Moneda</th><th class="td-r">Saldo</th></tr></thead>
+    <thead><tr>
+      <th onclick="handleSort(event,'alyc','negativos')">ALyC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'comitente','negativos')">CC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'cli','negativos')">Cliente<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'ticker','negativos')">Moneda<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'tenencia','negativos')">Saldo<span class="sort-icon"></span></th>
+    </tr></thead>
     <tbody>${filas.map(p=>`<tr>
       <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
       <td>${cashLabel(p.ticker)}</td>
@@ -1595,17 +1656,24 @@ function waNegativoss() {
 // ═══════════════════════════════════════════
 function renderExterior() {
   const alycFil=$('extFilterAlyc')?.value||'';
-  const filas=posiciones
+  let filas=posiciones
     .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
-    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
+    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}));
+  if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
+  else filas=sortRows(filas,'alyc');
   const el=$('exteriorBody');
   if(!filas.length){
     el.innerHTML='<div class="empty-state"><div class="es-icon">💵</div><p>Sin tenencias de dólares exterior / 7000</p></div>';
     return;
   }
   el.innerHTML=`<div class="table-wrap"><table>
-    <thead><tr><th>ALyC</th><th>CC</th><th>Cliente</th><th>Moneda</th><th class="td-r">Saldo USD</th></tr></thead>
+    <thead><tr>
+      <th onclick="handleSort(event,'alyc','exterior')">ALyC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'comitente','exterior')">CC<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'cli','exterior')">Cliente<span class="sort-icon"></span></th>
+      <th onclick="handleSort(event,'ticker','exterior')">Moneda<span class="sort-icon"></span></th>
+      <th class="td-r" onclick="handleSort(event,'tenencia','exterior')">Saldo USD<span class="sort-icon"></span></th>
+    </tr></thead>
     <tbody>${filas.map(p=>`<tr>
       <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
       <td>${cashLabel(p.ticker)}</td>
