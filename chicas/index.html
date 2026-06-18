@@ -190,6 +190,66 @@ tr.row-sent td { opacity:.4; }
 ::-webkit-scrollbar { width:5px; height:5px; }
 ::-webkit-scrollbar-track { background:var(--bg2); }
 ::-webkit-scrollbar-thumb { background:var(--bg4); border-radius:3px; }
+
+/* RESPONSIVE DESIGN */
+@media (max-width: 768px) {
+  body { font-size: 11px; }
+  .main { max-width: 100%; padding: 16px 12px 60px; }
+  .app-header { padding: 0 12px; }
+  .nav-tabs { padding: 0 12px; }
+  .nav-tab { padding: 10px 14px; font-size: 11px; }
+  .filter-panel { padding: 14px 12px; }
+  .ordenes-panel { margin-bottom: 16px; }
+  .ordenes-header { padding: 12px 14px; gap: 8px; }
+
+  /* Tabla más compacta */
+  th { padding: 6px 8px; font-size: 9px; }
+  td { padding: 0 8px; font-size: 11px; height: 44px; }
+
+  /* Inputs más pequeños */
+  .cant-input { width: 60px; padding: 4px 6px; font-size: 11px; }
+  .cant-sug { font-size: 9px; }
+
+  /* Botones más compactos */
+  .btn { padding: 6px 12px; font-size: 11px; }
+  .btn-sm { padding: 4px 8px; font-size: 10px; }
+
+  /* Ocultar columnas menos importantes en móviles */
+  .col-hide-mobile { display: none; }
+
+  /* Hacer la tabla scrolleable horizontal */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  /* Botón WhatsApp más compacto */
+  .btn-enviar, .badge-sent {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  body { font-size: 10px; }
+  .main { padding: 12px 8px 50px; }
+  .app-header { height: 48px; padding: 0 8px; }
+  .logo { font-size: 14px; }
+  .header-sep { display: none; }
+
+  th { padding: 4px 6px; font-size: 8px; }
+  td { padding: 0 6px; font-size: 10px; height: 40px; }
+
+  .cant-input { width: 50px; padding: 3px 4px; font-size: 10px; }
+  .btn { padding: 5px 10px; font-size: 10px; }
+  .btn-sm { padding: 3px 6px; font-size: 9px; }
+
+  .filter-row { gap: 8px; }
+  .fg label { font-size: 8px; }
+  select, input { font-size: 11px; padding: 6px 8px; }
+}
 </style>
 </head>
 <body>
