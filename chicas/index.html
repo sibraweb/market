@@ -487,7 +487,6 @@ let compraCants = {};
 const $ = id => document.getElementById(id);
 const normCC = v => { if (!v && v!==0) return ''; const n=parseFloat(String(v).trim()); return isFinite(n)?String(Math.round(n)):String(v).trim(); };
 const fmt = (n,d=0) => isFinite(n)?n.toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
-const fmtPct = (n) => isFinite(n) ? n.toFixed(2)+'%' : '—';
 const fechaHoy = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const horaAhora = () => { const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
 const fechaLegible = () => { const d=new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${horaAhora()}hs`; };
@@ -1004,51 +1003,6 @@ function saldoLiquido(alyc, comitente) {
 }
 
 // ═══════════════════════════════════════════
-//  TOTALES NETOS Y BRUTOS POR CLIENTE
-// ═══════════════════════════════════════════
-function getClienteCarteras(alyc, comitente) {
-  // Calcular tenencia neta: suma de todos los tickers (excluyendo CASH_USD_EXT, CASH_USD_7000)
-  let netaARS = 0;
-  let netaUSD = 0;
-  let brutaARS = 0;
-  let brutaUSD = 0;
-
-  // MEP para conversión
-  const mep = getPrice('AL30/AL30D') || 1;
-
-  posiciones.forEach(p => {
-    if (p.alyc !== alyc || normCC(p.comitente) !== normCC(comitente)) return;
-
-    const price = getPrice(p.ticker) || 0;
-    const tenencia = p.tenencia || 0;
-    const valor = tenencia * price;
-
-    if (p.ticker.startsWith('CASH_')) {
-      if (p.ticker === 'CASH_ARS') {
-        netaARS += tenencia;
-        brutaARS += tenencia;
-      } else if (p.ticker === 'CASH_USD_MEP' || p.ticker === 'CASH_USD') {
-        netaUSD += tenencia;
-        brutaUSD += tenencia;
-      } else if (p.ticker === 'CASH_USD_EXT' || p.ticker === 'CASH_USD_7000') {
-        // Los dólares exterior no se cuentan en neta
-        brutaUSD += tenencia;
-      }
-    } else {
-      // Papeles: se cuentan en ARS
-      netaARS += valor;
-      brutaARS += valor;
-    }
-  });
-
-  // Convertir a ARS
-  const netaArsTotal = netaARS + (netaUSD * mep);
-  const brutaArsTotal = brutaARS + (brutaUSD * mep);
-
-  return { neta: netaArsTotal, bruta: brutaArsTotal };
-}
-
-// ═══════════════════════════════════════════
 //  SELECTORES
 // ═══════════════════════════════════════════
 function actualizarSelectores() {
@@ -1278,7 +1232,7 @@ function renderVentas() {
     <thead><tr>
       <th>ALyC</th><th>CC</th><th>Cliente</th><th>Ticker</th>
       <th class="td-r">Stock real</th><th class="td-r">Precio spot</th>
-      <th class="td-r">Cantidad a vender</th><th class="td-r">Monto ARS</th><th class="td-r">% neto</th><th class="td-r">% bruto</th><th></th>
+      <th class="td-r">Cantidad a vender</th><th class="td-r">Monto ARS</th><th></th>
     </tr></thead>
     <tbody>
     ${filas.map(p=>{
@@ -1291,10 +1245,6 @@ function renderVentas() {
       const montoARS=precio?cant*precio:null;
       const isSent=sent.has(key);
       const msg=formatVenta(p,cant);
-      // Calcular porcentajes
-      const carteras=getClienteCarteras(p.alyc,p.comitente);
-      const pctNeto=carteras.neta>0?(montoARS||0)/carteras.neta*100:0;
-      const pctBruto=carteras.bruta>0?(montoARS||0)/carteras.bruta*100:0;
       return `<tr id="vrow-${key}" class="${isSent?'row-sent':''}">
         <td><span style="font-size:10px;font-weight:700;color:var(--text2);">${p.alyc}</span></td>
         <td style="font-weight:700;">CC ${p.comitente}</td>
@@ -1311,8 +1261,6 @@ function renderVentas() {
           </div>
         </td>
         <td class="td-r" style="color:var(--green);" id="vmonto-${key}">${montoARS?'$'+fmt(montoARS):'—'}</td>
-        <td class="td-r"><strong>${fmtPct(pctNeto)}</strong></td>
-        <td class="td-r" style="color:var(--text2);"><strong>${fmtPct(pctBruto)}</strong></td>
         <td id="vcell-${key}">
           ${isSent?'<span class="badge-sent">✓ Enviado</span>'
             :`<a class="btn-enviar" href="${waLink(msg)}" target="_blank"
@@ -1413,7 +1361,7 @@ function renderCompras() {
     <thead><tr>
       <th>ALyC</th><th>CC</th><th>Cliente</th>
       <th class="td-r">Saldo ARS</th><th class="td-r">Cant. máx.</th>
-      <th class="td-r">Cantidad a comprar</th><th class="td-r">Monto ARS</th><th class="td-r">% neto</th><th class="td-r">% bruto</th><th></th>
+      <th class="td-r">Cantidad a comprar</th><th class="td-r">Monto ARS</th><th></th>
     </tr></thead>
     <tbody>
     ${filas.map(f=>{
@@ -1425,10 +1373,6 @@ function renderCompras() {
       const montoARS=cant*precio;
       const isSent=sent.has(key);
       const msg=formatCompra(f.alyc,f.comitente,compraTicker,cant);
-      // Calcular porcentajes
-      const carteras=getClienteCarteras(f.alyc,f.comitente);
-      const pctNeto=carteras.neta>0?montoARS/carteras.neta*100:0;
-      const pctBruto=carteras.bruta>0?montoARS/carteras.bruta*100:0;
       return `<tr id="crow-${key}" class="${isSent?'row-sent':''}">
         <td><span style="font-size:10px;font-weight:700;color:var(--text2);">${f.alyc}</span></td>
         <td style="font-weight:700;">CC ${f.comitente}</td>
@@ -1444,8 +1388,6 @@ function renderCompras() {
           </div>
         </td>
         <td class="td-r" style="color:var(--amber);" id="cmonto-${key}">$${fmt(montoARS)}</td>
-        <td class="td-r"><strong>${fmtPct(pctNeto)}</strong></td>
-        <td class="td-r" style="color:var(--text2);"><strong>${fmtPct(pctBruto)}</strong></td>
         <td id="ccell-${key}">
           ${isSent?'<span class="badge-sent">✓ Enviado</span>'
             :`<a class="btn-enviar" href="${waLink(msg)}" target="_blank"
