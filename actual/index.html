@@ -794,6 +794,7 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
   <div class="nav-tab active" data-tab="fuentes">Fuentes de datos</div>
   <div class="nav-tab" data-tab="cartera">Cartera</div>
   <div class="nav-tab" data-tab="dashboard">Dashboard</div>
+  <div class="nav-tab" data-tab="allocations">Allocations</div>
 </nav>
 
 <!-- ══════════ PANEL: FUENTES ══════════ -->
@@ -1183,6 +1184,78 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
   </div>
 </div>
 
+<!-- ══════════ PANEL: ALLOCATIONS ══════════ -->
+<div class="panel" id="panel-allocations">
+
+  <!-- Filtros cruzados Power BI style -->
+  <div id="allocFilterRow" class="dash-filter-row">
+    <label>Filtros:</label>
+    <select class="filter-select-inline" id="aGrupo"    onchange="App.applyAllocFilters()"><option value="">Grupo</option></select>
+    <select class="filter-select-inline" id="aSubgrupo" onchange="App.applyAllocFilters()"><option value="">Subgrupo</option></select>
+    <select class="filter-select-inline" id="aPais"     onchange="App.applyAllocFilters()"><option value="">País</option></select>
+    <select class="filter-select-inline" id="aSector"   onchange="App.applyAllocFilters()"><option value="">Sector</option></select>
+    <select class="filter-select-inline" id="aSubtipo"  onchange="App.applyAllocFilters()"><option value="">Subtipo</option></select>
+    <button class="btn-secondary" style="font-size:11px; padding:5px 12px;" onclick="App.clearAllocFilters()">✕ Limpiar</button>
+    <div id="allocActiveChips" class="filter-chips" style="margin:0; flex:1;"></div>
+  </div>
+
+  <!-- Contenedor principal de allocations -->
+  <div id="allocContent" style="display:none;">
+    <!-- Resumen de filtro -->
+    <div style="margin-bottom:16px; padding:12px; background:var(--bg3); border:1px solid var(--border); border-radius:6px;">
+      <div style="font-size:11px; color:var(--text2); margin-bottom:6px;">Filtro aplicado:</div>
+      <div id="allocFilterSummary" style="font-size:13px; color:var(--text);"></div>
+    </div>
+
+    <!-- Tabla de cuentas -->
+    <div style="margin-bottom:20px;">
+      <div style="margin-bottom:10px; font-weight:600; font-size:13px;">Cuentas con este filtro</div>
+      <div class="table-wrap" id="allocClientesTable">
+        <table>
+          <thead>
+            <tr>
+              <th>Cuenta / Cliente</th>
+              <th style="text-align:right;">% Neto</th>
+              <th style="text-align:right;">% Bruto</th>
+              <th style="text-align:right;">Cantidad Tickers</th>
+            </tr>
+          </thead>
+          <tbody id="allocClientesTbody">
+            <tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text3);">Sin datos</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tabla de tickers -->
+    <div>
+      <div style="margin-bottom:10px; font-weight:600; font-size:13px;">Tickers en este filtro</div>
+      <div class="table-wrap" id="allocTickersTable">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Tipo</th>
+              <th style="text-align:right;">% Neto Total</th>
+              <th style="text-align:right;">% Bruto Total</th>
+              <th style="text-align:right;">Cuentas que lo tienen</th>
+            </tr>
+          </thead>
+          <tbody id="allocTickersTbody">
+            <tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text3);">Sin datos</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="allocEmpty" class="empty-state">
+    <div class="es-icon">📍</div>
+    <p>Seleccioná un filtro para ver las asignaciones</p>
+    <small>Filtrá por país, grupo, sector u otro criterio</small>
+  </div>
+</div>
+
 <!-- ══════════ PANEL: CARTERAS MODELO ══════════ -->
 <div class="panel" id="panel-carteras">
   <div class="subtab-row">
@@ -1493,6 +1566,8 @@ const S = {
   dashFilters: { grupo:'', subgrupo:'', pais:'', sector:'', subtipo:'' },
   dashCurrentComitente: null,
   dashCurrentAlyc: null,
+  // allocations filters
+  allocFilters: { grupo:'', subgrupo:'', pais:'', sector:'', subtipo:'' },
 };
 
 // ── HELPERS ──
@@ -3005,6 +3080,168 @@ function clearDashFilters() {
   actualizarDashboard();
 }
 
+// ══════════════════════════════════════════
+//  ALLOCATIONS — Cuentas y Tickers por filtro
+// ══════════════════════════════════════════
+function applyAllocFilters() {
+  S.allocFilters = {
+    grupo:    $('aGrupo')?.value    || '',
+    subgrupo: $('aSubgrupo')?.value || '',
+    pais:     $('aPais')?.value     || '',
+    sector:   $('aSector')?.value   || '',
+    subtipo:  $('aSubtipo')?.value  || '',
+  };
+  Object.entries({ aGrupo:'grupo', aSubgrupo:'subgrupo', aPais:'pais', aSector:'sector', aSubtipo:'subtipo' }).forEach(([id, key]) => {
+    const el = $(id);
+    if (el) el.className = `filter-select-inline${S.allocFilters[key] ? ' active-filter' : ''}`;
+  });
+  actualizarAllocations();
+}
+
+function clearAllocFilters() {
+  S.allocFilters = { grupo:'', subgrupo:'', pais:'', sector:'', subtipo:'' };
+  ['aGrupo','aSubgrupo','aPais','aSector','aSubtipo'].forEach(id => {
+    const el = $(id);
+    if (el) { el.value = ''; el.className = 'filter-select-inline'; }
+  });
+  const chips = $('allocActiveChips');
+  if (chips) chips.innerHTML = '';
+  actualizarAllocations();
+}
+
+function actualizarAllocations() {
+  const hayFiltro = Object.values(S.allocFilters).some(v => v);
+
+  if (!hayFiltro) {
+    $('allocEmpty').style.display = '';
+    $('allocContent').style.display = 'none';
+    return;
+  }
+
+  // Filtrar posiciones según allocFilters
+  const posFiltered = S.posiciones.filter(p => {
+    const alloc = S.allocation[p.ticker] || {};
+    const f = S.allocFilters;
+    return (!f.grupo    || alloc.grupo    === f.grupo) &&
+           (!f.subgrupo || alloc.subgrupo === f.subgrupo) &&
+           (!f.pais     || alloc.pais     === f.pais) &&
+           (!f.sector   || alloc.sector   === f.sector) &&
+           (!f.subtipo  || alloc.subtipo  === f.subtipo);
+  });
+
+  if (posFiltered.length === 0) {
+    $('allocEmpty').style.display = '';
+    $('allocContent').style.display = 'none';
+    return;
+  }
+
+  $('allocEmpty').style.display = 'none';
+  $('allocContent').style.display = '';
+
+  const mep = S.mep || 1;
+
+  // ─────────────────────
+  // Cuentas por filtro
+  // ─────────────────────
+  const cuentasMap = {};
+  posFiltered.forEach(p => {
+    if (!cuentasMap[p.comitente]) {
+      cuentasMap[p.comitente] = {
+        comitente: p.comitente,
+        cliente: p.cliente,
+        valor: 0,
+        tickers: new Set(),
+      };
+    }
+    cuentasMap[p.comitente].valor += p.tenencia * (getPrecioUnitario(p.ticker, clasificarTicker(p.ticker, S.allocation[p.ticker])) ?? 0);
+    cuentasMap[p.comitente].tickers.add(p.ticker);
+  });
+
+  const totalValor = Object.values(cuentasMap).reduce((s, c) => s + c.valor, 0);
+  const cuentasOrdenadas = Object.values(cuentasMap).sort((a, b) => b.valor - a.valor);
+
+  // Render tabla de cuentas
+  const tbCuentas = $('allocClientesTbody');
+  if (tbCuentas) {
+    tbCuentas.innerHTML = cuentasOrdenadas.map(c => `<tr>
+      <td><strong>${c.cliente}</strong><br><span style="font-size:10px; color:var(--text3);">${c.comitente}</span></td>
+      <td class="td-num"><strong>${fmtPct(c.valor / totalValor * 100)}</strong></td>
+      <td class="td-num" style="color:var(--text2);">${fmtPct(c.valor / totalValor * 100)}</td>
+      <td class="td-num">${c.tickers.size}</td>
+    </tr>`).join('');
+  }
+
+  // ─────────────────────
+  // Tickers por filtro
+  // ─────────────────────
+  const tickersMap = {};
+  posFiltered.forEach(p => {
+    if (!tickersMap[p.ticker]) {
+      const alloc = S.allocation[p.ticker] || {};
+      tickersMap[p.ticker] = {
+        ticker: p.ticker,
+        tipo: clasificarTicker(p.ticker, alloc),
+        valor: 0,
+        cuentas: new Set(),
+      };
+    }
+    tickersMap[p.ticker].valor += p.tenencia * (getPrecioUnitario(p.ticker, clasificarTicker(p.ticker, S.allocation[p.ticker])) ?? 0);
+    tickersMap[p.ticker].cuentas.add(p.comitente);
+  });
+
+  const tickersOrdenados = Object.values(tickersMap).sort((a, b) => b.valor - a.valor);
+
+  // Render tabla de tickers
+  const tbTickers = $('allocTickersTbody');
+  if (tbTickers) {
+    const tipoPill = {
+      ACCION_ARG:'pill-green', CEDEAR:'pill-blue', RENTA_FIJA:'pill-amber',
+      ON:'pill-amber', ADR:'pill-blue', ETF:'pill-blue', FCI:'pill-blue',
+      CASH_ARS:'pill-gray', CASH_USD:'pill-gray', DESCONOCIDO:'pill-gray'
+    };
+    tbTickers.innerHTML = tickersOrdenados.map(t => `<tr>
+      <td><strong>${t.ticker}</strong></td>
+      <td><span class="pill ${tipoPill[t.tipo]||'pill-gray'}" style="font-size:10px;">${t.tipo.replace('_',' ')}</span></td>
+      <td class="td-num"><strong>${fmtPct(t.valor / totalValor * 100)}</strong></td>
+      <td class="td-num" style="color:var(--text2);">${fmtPct(t.valor / totalValor * 100)}</td>
+      <td class="td-num">${t.cuentas.size}</td>
+    </tr>`).join('');
+  }
+
+  // ─────────────────────
+  // Resumen del filtro
+  // ─────────────────────
+  const filterLabels = Object.entries(S.allocFilters)
+    .filter(([_, v]) => v)
+    .map(([k, v]) => `${k.charAt(0).toUpperCase() + k.slice(1)}: <strong>${v}</strong>`)
+    .join(' · ');
+
+  const summaryEl = $('allocFilterSummary');
+  if (summaryEl) {
+    summaryEl.innerHTML = `${filterLabels}<br><span style="font-size:11px; color:var(--text2);">${cuentasOrdenadas.length} cuentas · ${tickersOrdenados.length} tickers · Total: $${fmt(totalValor)}</span>`;
+  }
+
+  // Populate filtros con valores únicos disponibles
+  const cartela = posFiltered.map(p => {
+    const alloc = S.allocation[p.ticker] || {};
+    return { ...p, alloc };
+  });
+  const uniq = (key) => [...new Set(cartela.map(p => p.alloc[key]).filter(Boolean))].sort();
+  const fill = (id, vals, label) => {
+    const el = $(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option>${v}</option>`).join('');
+    if (cur) el.value = cur;
+    el.className = `filter-select-inline${cur ? ' active-filter' : ''}`;
+  };
+  fill('aGrupo',    uniq('grupo'),    'Grupo');
+  fill('aSubgrupo', uniq('subgrupo'), 'Subgrupo');
+  fill('aPais',     uniq('pais'),     'País');
+  fill('aSector',   uniq('sector'),   'Sector');
+  fill('aSubtipo',  uniq('subtipo'),  'Subtipo');
+}
+
 function valuarCartera(pos) {
   const mapa = {};
   pos.forEach(p => {
@@ -3476,6 +3713,7 @@ return {
   filtrarCartera, limpiarFiltroGlobal, sortCartera,
   applyDashFilters, clearDashFilter, clearDashFilters,
   actualizarDashboard,
+  applyAllocFilters, clearAllocFilters, actualizarAllocations,
   renderModelo, calcularRotacion,
   cargarOrdenesYResultado,
   exportarCarteraGlobal, exportarOperaciones, exportarResultado,
