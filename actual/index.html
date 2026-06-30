@@ -1300,8 +1300,8 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
         <thead>
           <tr>
             <th>Cuenta / Cliente</th>
-            <th style="text-align:right">% de su cartera</th>
-            <th style="text-align:right">% del total filtrado</th>
+            <th style="text-align:right">% neto</th>
+            <th style="text-align:right">% bruto</th>
             <th style="text-align:right">Valor $</th>
             <th style="text-align:right">Tickers</th>
           </tr>
@@ -1323,13 +1323,14 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
             <th>Tipo</th>
             <th>Grupo</th>
             <th>País</th>
-            <th style="text-align:right">% del filtro</th>
+            <th style="text-align:right">% neto</th>
+            <th style="text-align:right">% bruto</th>
             <th style="text-align:right">Valor $</th>
             <th style="text-align:right">Cuentas</th>
           </tr>
         </thead>
         <tbody id="allocTickersTbody">
-          <tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text3)">Cargá los datos de cartera para ver los títulos</td></tr>
+          <tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text3)">Cargá los datos de cartera para ver los títulos</td></tr>
         </tbody>
       </table>
     </div>
@@ -3272,7 +3273,29 @@ function setAllocView(view) {
 function actualizarAllocations() {
   if (!S.posiciones.length) return;
 
+  const mep = S.mep || 1;
   const f = S.allocFilters;
+
+  // ── Neta y bruta TOTAL por cuenta (sin filtro), igual que en Cartera ──
+  const porCuenta = {};
+  S.posiciones.forEach(p => {
+    if (!porCuenta[p.comitente]) porCuenta[p.comitente] = [];
+    porCuenta[p.comitente].push(p);
+  });
+  const cuentaInfo = {}; // comitente -> { cliente, netaCliente, brutaCliente }
+  Object.entries(porCuenta).forEach(([comitente, pos]) => {
+    const cli = findCliente(comitente);
+    const cartela = valuarCartera(pos);
+    const netaCliente = cartela.reduce((s, p) => s + p.valor, 0);
+    const caucionPesos   = cli?.caucionPesos   || 0;
+    const caucionDolares = cli?.caucionDolares || 0;
+    const brutaCliente = netaCliente + caucionPesos + caucionDolares * mep;
+    cuentaInfo[comitente] = { cliente: cli?.cliente || comitente, netaCliente, brutaCliente };
+  });
+  const totalNetaGlobal  = Object.values(cuentaInfo).reduce((s, c) => s + c.netaCliente,  0);
+  const totalBrutaGlobal = Object.values(cuentaInfo).reduce((s, c) => s + c.brutaCliente, 0);
+
+  // ── Posiciones que pasan el filtro de Allocations ──
   const posFiltered = S.posiciones.filter(p => {
     const a = S.allocation[p.ticker] || {};
     return (!f.alyc.size     || f.alyc.has(p.alyc))                          &&
@@ -3288,21 +3311,13 @@ function actualizarAllocations() {
     ON:'pill-amber', ADR:'pill-blue', ETF:'pill-blue', FCI:'pill-blue',
     CASH_ARS:'pill-gray', CASH_USD:'pill-gray', DESCONOCIDO:'pill-gray' };
 
-  // Total bruto por cuenta (sin filtro, para calcular % dentro de la cartera propia)
-  const totalPorCuenta = {};
-  S.posiciones.forEach(p => {
-    const tipo = clasificarTicker(p.ticker, S.allocation[p.ticker]);
-    const val  = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
-    totalPorCuenta[p.comitente] = (totalPorCuenta[p.comitente] || 0) + val;
-  });
-
-  // ── Cuentas ──
+  // ── Cuentas: % neto y % bruto siempre sobre el total de ESA cuenta (no sobre el filtro) ──
   const cuentasMap = {};
   posFiltered.forEach(p => {
     const tipo = clasificarTicker(p.ticker, S.allocation[p.ticker]);
     const val  = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
     if (!cuentasMap[p.comitente])
-      cuentasMap[p.comitente] = { comitente: p.comitente, cliente: findCliente(p.comitente)?.cliente || p.comitente, valor: 0, tickers: new Set() };
+      cuentasMap[p.comitente] = { comitente: p.comitente, cliente: cuentaInfo[p.comitente]?.cliente || p.comitente, valor: 0, tickers: new Set() };
     cuentasMap[p.comitente].valor += val;
     cuentasMap[p.comitente].tickers.add(p.ticker);
   });
@@ -3310,16 +3325,21 @@ function actualizarAllocations() {
   const totalFiltro = cuentasOrdenadas.reduce((s, c) => s + c.valor, 0);
 
   $('allocClientesTbody').innerHTML = cuentasOrdenadas.length
-    ? cuentasOrdenadas.map(c => `<tr>
-        <td><strong>${c.cliente}</strong><br><span style="font-size:10px;color:var(--text3)">${c.comitente}</span></td>
-        <td class="td-num"><strong>${fmtPct(c.valor / (totalPorCuenta[c.comitente] || 1) * 100)}</strong><br><span style="font-size:10px;color:var(--text3)">de su cartera</span></td>
-        <td class="td-num" style="color:var(--text2)"><strong>${fmtPct(c.valor / (totalFiltro || 1) * 100)}</strong><br><span style="font-size:10px;color:var(--text3)">del total filtrado</span></td>
-        <td class="td-num">$${fmt(c.valor)}</td>
-        <td class="td-num">${c.tickers.size}</td>
-      </tr>`).join('')
+    ? cuentasOrdenadas.map(c => {
+        const info = cuentaInfo[c.comitente] || { netaCliente: 0, brutaCliente: 0 };
+        const pctNeto  = info.netaCliente  > 0 ? c.valor / info.netaCliente  * 100 : 0;
+        const pctBruto = info.brutaCliente > 0 ? c.valor / info.brutaCliente * 100 : 0;
+        return `<tr>
+          <td><strong>${c.cliente}</strong><br><span style="font-size:10px;color:var(--text3)">${c.comitente}</span></td>
+          <td class="td-num"><strong>${fmtPct(pctNeto)}</strong></td>
+          <td class="td-num" style="color:var(--text2)"><strong>${fmtPct(pctBruto)}</strong></td>
+          <td class="td-num">$${fmt(c.valor)}</td>
+          <td class="td-num">${c.tickers.size}</td>
+        </tr>`;
+      }).join('')
     : `<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text3)">Sin datos para este filtro</td></tr>`;
 
-  // ── Títulos ──
+  // ── Títulos: % neto y % bruto sobre el total de la cartera global (todas las cuentas) ──
   const tickersMap = {};
   posFiltered.forEach(p => {
     const alloc = S.allocation[p.ticker] || {};
@@ -3333,16 +3353,21 @@ function actualizarAllocations() {
   const tickersOrdenados = Object.values(tickersMap).sort((a, b) => b.valor - a.valor);
 
   $('allocTickersTbody').innerHTML = tickersOrdenados.length
-    ? tickersOrdenados.map(t => `<tr>
-        <td><strong>${t.ticker}</strong></td>
-        <td><span class="pill ${tipoPill[t.tipo]||'pill-gray'}" style="font-size:10px">${t.tipo.replace(/_/g,' ')}</span></td>
-        <td class="td-muted">${t.alloc.grupo  || '—'}</td>
-        <td class="td-muted">${t.alloc.pais   || '—'}</td>
-        <td class="td-num"><strong>${fmtPct(t.valor / (totalFiltro || 1) * 100)}</strong></td>
-        <td class="td-num">$${fmt(t.valor)}</td>
-        <td class="td-num">${t.cuentas.size}</td>
-      </tr>`).join('')
-    : `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text3)">Sin datos para este filtro</td></tr>`;
+    ? tickersOrdenados.map(t => {
+        const pctNeto  = totalNetaGlobal  > 0 ? t.valor / totalNetaGlobal  * 100 : 0;
+        const pctBruto = totalBrutaGlobal > 0 ? t.valor / totalBrutaGlobal * 100 : 0;
+        return `<tr>
+          <td><strong>${t.ticker}</strong></td>
+          <td><span class="pill ${tipoPill[t.tipo]||'pill-gray'}" style="font-size:10px">${t.tipo.replace(/_/g,' ')}</span></td>
+          <td class="td-muted">${t.alloc.grupo  || '—'}</td>
+          <td class="td-muted">${t.alloc.pais   || '—'}</td>
+          <td class="td-num"><strong>${fmtPct(pctNeto)}</strong></td>
+          <td class="td-num" style="color:var(--text2)">${fmtPct(pctBruto)}</td>
+          <td class="td-num">$${fmt(t.valor)}</td>
+          <td class="td-num">${t.cuentas.size}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text3)">Sin datos para este filtro</td></tr>`;
 
   // ── Resumen ──
   const hayFiltro = Object.values(f).some(s => s.size > 0);
