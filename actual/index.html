@@ -1240,6 +1240,14 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
   <!-- Filtros multi-select -->
   <div class="dash-filter-row" style="align-items:center; flex-wrap:wrap;">
     <label>Filtros:</label>
+    <div class="alloc-ms" id="alloc-ms-alyc">
+      <button class="alloc-ms-btn" onclick="App.toggleAllocDrop(this)">ALyC ▾</button>
+      <div class="alloc-ms-drop"></div>
+    </div>
+    <div class="alloc-ms" id="alloc-ms-cc">
+      <button class="alloc-ms-btn" onclick="App.toggleAllocDrop(this)">CC / Cliente ▾</button>
+      <div class="alloc-ms-drop"></div>
+    </div>
     <div class="alloc-ms" id="alloc-ms-grupo">
       <button class="alloc-ms-btn" onclick="App.toggleAllocDrop(this)">Grupo ▾</button>
       <div class="alloc-ms-drop"></div>
@@ -1626,7 +1634,7 @@ const S = {
   dashCurrentComitente: null,
   dashCurrentAlyc: null,
   // allocations filters (Sets: vacío = Todos)
-  allocFilters: { grupo: new Set(), subgrupo: new Set(), pais: new Set(), sector: new Set(), subtipo: new Set() },
+  allocFilters: { alyc: new Set(), cc: new Set(), grupo: new Set(), subgrupo: new Set(), pais: new Set(), sector: new Set(), subtipo: new Set() },
   allocView: 'cuentas',
 };
 
@@ -3145,11 +3153,19 @@ function clearDashFilters() {
 //  ALLOCATIONS — Multi-select, dos vistas
 // ══════════════════════════════════════════
 
-const ALLOC_DIMS = { grupo:'Grupo', subgrupo:'Subgrupo', pais:'País', sector:'Sector', subtipo:'Subtipo' };
+const ALLOC_DIMS = { alyc:'ALyC', cc:'CC / Cliente', grupo:'Grupo', subgrupo:'Subgrupo', pais:'País', sector:'Sector', subtipo:'Subtipo' };
 
 function populateAllocFilters() {
   Object.entries(ALLOC_DIMS).forEach(([key, label]) => {
-    const vals = [...new Set(S.posiciones.map(p => (S.allocation[p.ticker]||{})[key]).filter(Boolean))].sort();
+    // alyc y cc vienen del posicion, el resto del allocation
+    let vals;
+    if (key === 'alyc')
+      vals = [...new Set(S.posiciones.map(p => p.alyc).filter(Boolean))].sort();
+    else if (key === 'cc')
+      vals = [...new Set(S.posiciones.map(p => p.cliente || p.comitente).filter(Boolean))].sort();
+    else
+      vals = [...new Set(S.posiciones.map(p => (S.allocation[p.ticker]||{})[key]).filter(Boolean))].sort();
+
     const wrap = $('alloc-ms-' + key);
     if (!wrap) return;
     const sel = S.allocFilters[key];
@@ -3160,7 +3176,7 @@ function populateAllocFilters() {
        </label>` +
       vals.map(v =>
         `<label class="alloc-ms-item">
-           <input type="checkbox" value="${v}" ${sel.has(v) ? 'checked' : ''} onchange="App.allocCheckChange('${key}',this)"> ${v}
+           <input type="checkbox" value="${v.replace(/"/g,'&quot;')}" ${sel.has(v) ? 'checked' : ''} onchange="App.allocCheckChange('${key}',this)"> ${v}
          </label>`
       ).join('');
     const btn = wrap.querySelector('.alloc-ms-btn');
@@ -3220,10 +3236,12 @@ function actualizarAllocations() {
   const f = S.allocFilters;
   const posFiltered = S.posiciones.filter(p => {
     const a = S.allocation[p.ticker] || {};
-    return (!f.grupo.size    || f.grupo.has(a.grupo))    &&
-           (!f.subgrupo.size || f.subgrupo.has(a.subgrupo)) &&
-           (!f.pais.size     || f.pais.has(a.pais))      &&
-           (!f.sector.size   || f.sector.has(a.sector))  &&
+    return (!f.alyc.size     || f.alyc.has(p.alyc))                          &&
+           (!f.cc.size       || f.cc.has(p.cliente || p.comitente))           &&
+           (!f.grupo.size    || f.grupo.has(a.grupo))                         &&
+           (!f.subgrupo.size || f.subgrupo.has(a.subgrupo))                   &&
+           (!f.pais.size     || f.pais.has(a.pais))                           &&
+           (!f.sector.size   || f.sector.has(a.sector))                       &&
            (!f.subtipo.size  || f.subtipo.has(a.subtipo));
   });
 
