@@ -1608,6 +1608,7 @@ function initNav() {
       document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
       t.classList.add('active');
       $('panel-' + t.dataset.tab).classList.add('active');
+      if (t.dataset.tab === 'allocations') populateAllocFilters();
     });
   });
 
@@ -3083,6 +3084,23 @@ function clearDashFilters() {
 // ══════════════════════════════════════════
 //  ALLOCATIONS — Cuentas y Tickers por filtro
 // ══════════════════════════════════════════
+function populateAllocFilters() {
+  const uniq = (key) => [...new Set(S.posiciones.map(p => (S.allocation[p.ticker] || {})[key]).filter(Boolean))].sort();
+  const fill = (id, vals, label) => {
+    const el = $(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option>${v}</option>`).join('');
+    if (cur) el.value = cur;
+    el.className = `filter-select-inline${cur ? ' active-filter' : ''}`;
+  };
+  fill('aGrupo',    uniq('grupo'),    'Grupo');
+  fill('aSubgrupo', uniq('subgrupo'), 'Subgrupo');
+  fill('aPais',     uniq('pais'),     'País');
+  fill('aSector',   uniq('sector'),   'Sector');
+  fill('aSubtipo',  uniq('subtipo'),  'Subtipo');
+}
+
 function applyAllocFilters() {
   S.allocFilters = {
     grupo:    $('aGrupo')?.value    || '',
@@ -3713,7 +3731,7 @@ return {
   filtrarCartera, limpiarFiltroGlobal, sortCartera,
   applyDashFilters, clearDashFilter, clearDashFilters,
   actualizarDashboard,
-  applyAllocFilters, clearAllocFilters, actualizarAllocations,
+  populateAllocFilters, applyAllocFilters, clearAllocFilters, actualizarAllocations,
   renderModelo, calcularRotacion,
   cargarOrdenesYResultado,
   exportarCarteraGlobal, exportarOperaciones, exportarResultado,
