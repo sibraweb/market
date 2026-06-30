@@ -1752,7 +1752,7 @@ function driveAuth() {
 
   const params = new URLSearchParams({
     client_id: clientId, redirect_uri: redirectUri, response_type: 'token',
-    scope: SCOPES, state, prompt: 'select_account',
+    scope: SCOPES, state, prompt: 'select_account', login_hint: 'web.sibra@gmail.com',
   });
 
   const popup = window.open('https://accounts.google.com/o/oauth2/v2/auth?' + params, 'googleOAuth', 'width=520,height=640,left=200,top=100');
