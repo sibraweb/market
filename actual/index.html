@@ -820,6 +820,19 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
 .alloc-ms-item:hover { background: var(--bg4); color: var(--text); }
 .alloc-ms-item.todos { font-weight: 600; color: var(--text); }
 .alloc-ms-item input[type="checkbox"] { accent-color: var(--red); cursor: pointer; flex-shrink: 0; }
+.alloc-ms-search { padding: 6px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg2); }
+.alloc-ms-search input {
+  width: 100%;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-family: var(--font-main);
+  font-size: 11px;
+  outline: none;
+}
+.alloc-ms-search input:focus { border-color: var(--red); }
 .alloc-subtab { cursor: pointer; }
 </style>
 </head>
@@ -3157,36 +3170,62 @@ const ALLOC_DIMS = { alyc:'ALyC', cc:'CC / Cliente', grupo:'Grupo', subgrupo:'Su
 
 function populateAllocFilters() {
   Object.entries(ALLOC_DIMS).forEach(([key, label]) => {
-    // alyc y cc vienen del posicion, el resto del allocation
-    let vals;
-    if (key === 'alyc')
-      vals = [...new Set(S.posiciones.map(p => p.alyc).filter(Boolean))].sort();
-    else if (key === 'cc')
-      vals = [...new Set(S.posiciones.map(p => p.cliente || p.comitente).filter(Boolean))].sort();
-    else
-      vals = [...new Set(S.posiciones.map(p => (S.allocation[p.ticker]||{})[key]).filter(Boolean))].sort();
+    // alyc y cc vienen del posicion (cc resuelve nombre real via findCliente), el resto del allocation
+    let items; // [{value, label, sub}]
+    if (key === 'alyc') {
+      items = [...new Set(S.posiciones.map(p => p.alyc).filter(Boolean))].sort()
+        .map(v => ({ value: v, label: v, sub: '' }));
+    } else if (key === 'cc') {
+      const seen = new Map();
+      S.posiciones.forEach(p => {
+        if (!p.comitente || seen.has(p.comitente)) return;
+        const cli = findCliente(p.comitente);
+        seen.set(p.comitente, cli?.cliente || p.comitente);
+      });
+      items = [...seen.entries()]
+        .map(([cc, nombre]) => ({ value: cc, label: nombre, sub: cc }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    } else {
+      items = [...new Set(S.posiciones.map(p => (S.allocation[p.ticker]||{})[key]).filter(Boolean))].sort()
+        .map(v => ({ value: v, label: v, sub: '' }));
+    }
 
     const wrap = $('alloc-ms-' + key);
     if (!wrap) return;
     const sel = S.allocFilters[key];
     const drop = wrap.querySelector('.alloc-ms-drop');
     drop.innerHTML =
+      `<div class="alloc-ms-search"><input type="text" placeholder="Buscar..." oninput="App.allocSearchFilter(this)"></div>` +
       `<label class="alloc-ms-item todos">
          <input type="checkbox" ${sel.size === 0 ? 'checked' : ''} onchange="App.allocTodosChange('${key}',this)"> Todos
        </label>` +
-      vals.map(v =>
-        `<label class="alloc-ms-item">
-           <input type="checkbox" value="${v.replace(/"/g,'&quot;')}" ${sel.has(v) ? 'checked' : ''} onchange="App.allocCheckChange('${key}',this)"> ${v}
+      items.map(it =>
+        `<label class="alloc-ms-item" data-search="${(it.label + ' ' + it.sub).toLowerCase().replace(/"/g,'&quot;')}">
+           <input type="checkbox" value="${it.value.replace(/"/g,'&quot;')}" ${sel.has(it.value) ? 'checked' : ''} onchange="App.allocCheckChange('${key}',this)">
+           <span>${it.label}${it.sub ? ` <small style="color:var(--text3)">· ${it.sub}</small>` : ''}</span>
          </label>`
       ).join('');
     const btn = wrap.querySelector('.alloc-ms-btn');
     if (sel.size === 0) {
       btn.textContent = label + ' ▾';
       btn.classList.remove('active-filter');
+    } else if (sel.size === 1) {
+      const found = items.find(it => it.value === [...sel][0]);
+      btn.textContent = `${label}: ${found ? found.label : [...sel][0]} ▾`;
+      btn.classList.add('active-filter');
     } else {
-      btn.textContent = `${label}: ${sel.size === 1 ? [...sel][0] : sel.size + ' sel.'} ▾`;
+      btn.textContent = `${label}: ${sel.size} sel. ▾`;
       btn.classList.add('active-filter');
     }
+  });
+}
+
+function allocSearchFilter(input) {
+  const q = input.value.toLowerCase().trim();
+  const drop = input.closest('.alloc-ms-drop');
+  drop.querySelectorAll('.alloc-ms-item:not(.todos)').forEach(item => {
+    const txt = item.dataset.search || '';
+    item.style.display = !q || txt.includes(q) ? '' : 'none';
   });
 }
 
@@ -3237,7 +3276,7 @@ function actualizarAllocations() {
   const posFiltered = S.posiciones.filter(p => {
     const a = S.allocation[p.ticker] || {};
     return (!f.alyc.size     || f.alyc.has(p.alyc))                          &&
-           (!f.cc.size       || f.cc.has(p.cliente || p.comitente))           &&
+           (!f.cc.size       || f.cc.has(p.comitente))                        &&
            (!f.grupo.size    || f.grupo.has(a.grupo))                         &&
            (!f.subgrupo.size || f.subgrupo.has(a.subgrupo))                   &&
            (!f.pais.size     || f.pais.has(a.pais))                           &&
@@ -3263,7 +3302,7 @@ function actualizarAllocations() {
     const tipo = clasificarTicker(p.ticker, S.allocation[p.ticker]);
     const val  = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
     if (!cuentasMap[p.comitente])
-      cuentasMap[p.comitente] = { comitente: p.comitente, cliente: p.cliente, valor: 0, tickers: new Set() };
+      cuentasMap[p.comitente] = { comitente: p.comitente, cliente: findCliente(p.comitente)?.cliente || p.comitente, valor: 0, tickers: new Set() };
     cuentasMap[p.comitente].valor += val;
     cuentasMap[p.comitente].tickers.add(p.ticker);
   });
@@ -3789,7 +3828,7 @@ return {
   filtrarCartera, limpiarFiltroGlobal, sortCartera,
   applyDashFilters, clearDashFilter, clearDashFilters,
   actualizarDashboard,
-  populateAllocFilters, toggleAllocDrop, allocCheckChange, allocTodosChange, clearAllocFilters, setAllocView, actualizarAllocations,
+  populateAllocFilters, toggleAllocDrop, allocCheckChange, allocTodosChange, allocSearchFilter, clearAllocFilters, setAllocView, actualizarAllocations,
   renderModelo, calcularRotacion,
   cargarOrdenesYResultado,
   exportarCarteraGlobal, exportarOperaciones, exportarResultado,
