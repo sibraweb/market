@@ -170,6 +170,17 @@ tbody td:first-child{text-align:left;}
 .guide .g-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px;}
 .guide a{color:var(--blue);}
 
+/* MATRIZ */
+#matrizTable thead th { position:sticky; top:0; z-index:2; }
+#matrizTable thead th.col-mep  { color:var(--green); background:rgba(34,197,94,0.06); }
+#matrizTable thead th.col-al30 { color:var(--amber); background:rgba(245,158,11,0.06); }
+#matrizTable tbody td.col-mep  { color:var(--green); font-weight:600; background:rgba(34,197,94,0.04); }
+#matrizTable tbody td.col-al30 { color:var(--amber); background:rgba(245,158,11,0.04); }
+#matrizTable tbody td.up   { color:var(--green); }
+#matrizTable tbody td.down { color:var(--red-light); }
+#matrizTable thead th:first-child { text-align:left; position:sticky; left:0; z-index:3; }
+#matrizTable tbody td:first-child { text-align:left; position:sticky; left:0; background:var(--bg2); z-index:1; color:var(--text2); font-size:11px; }
+
 /* RESPONSIVE */
 @media(max-width:1100px){.bonos-layout{grid-template-columns:1fr;}.metrics{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:700px){.metrics{grid-template-columns:repeat(2,1fr);}}
@@ -193,6 +204,7 @@ tbody td:first-child{text-align:left;}
 <nav class="nav-tabs">
   <div class="nav-tab active" data-tab="acciones">Acciones</div>
   <div class="nav-tab" data-tab="bonos">Bonos</div>
+  <div class="nav-tab" data-tab="matriz">Matriz de precios</div>
 </nav>
 
 <main class="main">
@@ -408,6 +420,41 @@ tbody td:first-child{text-align:left;}
     </div>
 
   </div>
+</div>
+
+<!-- ══════════ PANEL: MATRIZ ══════════ -->
+<div class="panel" id="panel-matriz">
+
+  <div class="toolbar" style="margin-bottom:12px">
+    <div style="font-size:11px;color:var(--text2)">
+      Columns: <b>fecha</b> → <b style="color:var(--amber)">AL30</b> → <b style="color:var(--amber)">AL30D</b> → <b style="color:var(--green)">MEP</b> → un ticker por columna
+    </div>
+    <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+      <span style="font-size:10px;color:var(--text3)">Filas</span>
+      <select id="matrizRows" class="period-select" onchange="App.renderMatrix()">
+        <option value="30">30 días</option>
+        <option value="90">90 días</option>
+        <option value="252" selected>52 semanas</option>
+        <option value="504">2 años</option>
+        <option value="0">Todo</option>
+      </select>
+      <button class="btn-export" onclick="App.exportMatrizCsv()">↓ CSV</button>
+    </div>
+  </div>
+
+  <div style="font-size:11px;color:var(--text3);margin-bottom:10px;padding:8px 12px;background:var(--bg3);border-radius:4px;border:1px solid var(--border)">
+    ⓘ  Agregá <b style="color:var(--amber)">AL30</b> y <b style="color:var(--amber)">AL30D</b> a la watchlist → el MEP se calcula automáticamente (AL30 ÷ AL30D). Si no están disponibles en Yahoo Finance, usá el servidor local con datos de BYMA.
+  </div>
+
+  <div class="tbl-wrap" id="matrizWrap">
+    <table id="matrizTable">
+      <thead id="matrizHead"><tr><th>Fecha</th></tr></thead>
+      <tbody id="matrizTbody">
+        <tr><td class="empty">Cargá tickers en Acciones y hacé clic en ↻ Actualizar</td></tr>
+      </tbody>
+    </table>
+  </div>
+
 </div>
 
 </main>
@@ -1192,6 +1239,117 @@ const App = {
   },
 
   redrawCurve() { redrawCurve(); },
+
+  // ── MATRIZ ──
+  renderMatrix() {
+    const tickers = S.watchlist.map(w => w.ticker);
+    const loaded  = tickers.filter(t => S.prices[t]?.length);
+    if (!loaded.length) {
+      document.getElementById('matrizTbody').innerHTML =
+        `<tr><td colspan="99" class="empty">Cargá tickers en Acciones y hacé clic en ↻ Actualizar</td></tr>`;
+      return;
+    }
+
+    const maxRows = +document.getElementById('matrizRows').value || 252;
+    const usd     = document.getElementById('showUsd').checked;
+    const mep     = parseFloat(document.getElementById('mepRate').value) || 1;
+
+    // Build date→ticker→close lookup
+    const lookup = {};
+    for (const t of loaded) {
+      for (const d of S.prices[t]) {
+        const date = new Date(d.t).toISOString().split('T')[0];
+        if (!lookup[date]) lookup[date] = {};
+        lookup[date][t] = d.c;
+      }
+    }
+
+    // Sorted dates, most recent first, limited to maxRows
+    let dates = Object.keys(lookup).sort().reverse();
+    if (maxRows > 0) dates = dates.slice(0, maxRows);
+
+    // Column order: AL30, AL30D, MEP first (if present), then rest alphabetically
+    const SPECIAL = ['AL30', 'AL30D', 'AL30.BA', 'AL30D.BA'];
+    const al30Key  = loaded.find(t => t === 'AL30'  || t === 'AL30.BA');
+    const al30dKey = loaded.find(t => t === 'AL30D' || t === 'AL30D.BA');
+    const hasMep   = !!(al30Key && al30dKey);
+
+    const cols = [
+      ...loaded.filter(t => SPECIAL.includes(t)),
+      ...loaded.filter(t => !SPECIAL.includes(t)).sort(),
+    ];
+
+    // Header
+    const headCols = cols.map(t => {
+      const isAl = SPECIAL.includes(t);
+      return `<th class="${isAl?'col-al30':''}">${t}</th>`;
+    });
+    if (hasMep) headCols.splice(
+      cols.findIndex(t => t === al30dKey) + 1, 0,
+      `<th class="col-mep">MEP</th>`
+    );
+    document.getElementById('matrizHead').innerHTML =
+      `<tr><th>Fecha</th>${headCols.join('')}</tr>`;
+
+    // Build rows
+    const tbody = [];
+    let prevRow = null;
+    for (const date of dates) {
+      const row = lookup[date];
+      let cells = '';
+
+      for (let ci = 0; ci < cols.length; ci++) {
+        const t   = cols[ci];
+        const val = row[t];
+        const isAl = SPECIAL.includes(t);
+        const cls  = isAl ? 'col-al30 ' : '';
+
+        if (val == null) {
+          cells += `<td class="${cls}n_">—</td>`;
+        } else {
+          const disp  = usd && !isAl ? val / mep : val;
+          const prev  = prevRow?.[t];
+          const chgCls = prev == null ? '' : disp > (usd && !isAl ? prev / mep : prev) ? 'up' : disp < (usd && !isAl ? prev / mep : prev) ? 'down' : '';
+          cells += `<td class="${cls}${chgCls} num">${disp.toFixed(2)}</td>`;
+        }
+
+        // Insert MEP after AL30D
+        if (hasMep && t === al30dKey) {
+          const a = row[al30Key], b = row[al30dKey];
+          const mepVal = (a && b && b > 0) ? a / b : null;
+          if (mepVal == null) {
+            cells += `<td class="col-mep n_">—</td>`;
+          } else {
+            const prevMep = (prevRow?.[al30Key] && prevRow?.[al30dKey])
+              ? prevRow[al30Key] / prevRow[al30dKey] : null;
+            const chgCls = prevMep == null ? '' : mepVal > prevMep ? 'up' : mepVal < prevMep ? 'down' : '';
+            cells += `<td class="col-mep ${chgCls} num">${mepVal.toFixed(2)}</td>`;
+          }
+        }
+      }
+
+      tbody.push(`<tr><td>${date}</td>${cells}</tr>`);
+      prevRow = row;
+    }
+
+    document.getElementById('matrizTbody').innerHTML = tbody.join('') ||
+      `<tr><td colspan="99" class="empty">Sin datos en el período</td></tr>`;
+  },
+
+  exportMatrizCsv() {
+    const head = document.getElementById('matrizHead');
+    const body = document.getElementById('matrizTbody');
+    if (!head || !body) return;
+    const headers = [...head.querySelectorAll('th')].map(th => th.textContent);
+    const rows = [...body.querySelectorAll('tr')].map(tr =>
+      [...tr.querySelectorAll('td')].map(td => td.textContent)
+    );
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = `matriz_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+  },
 };
 
 // ────────────────────────────────────────
@@ -1221,6 +1379,7 @@ document.querySelectorAll('.nav-tab').forEach(t => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     t.classList.add('active');
     document.getElementById('panel-' + t.dataset.tab)?.classList.add('active');
+    if (t.dataset.tab === 'matriz') App.renderMatrix();
   });
 });
 
