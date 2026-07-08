@@ -38,6 +38,8 @@ body { background:var(--bg); color:var(--text); font-family:'Montserrat',sans-se
 }
 .btn-drive:hover { border-color:var(--red); color:var(--red); }
 .btn-drive.connected { border-color:var(--green); color:var(--green); }
+.back-btn { background:transparent; border:1px solid var(--border2); color:var(--text2); padding:5px 12px; border-radius:4px; cursor:pointer; font-family:'Montserrat',sans-serif; font-size:11px; text-decoration:none; display:flex; align-items:center; gap:5px; transition:all .2s; }
+.back-btn:hover { border-color:var(--red); color:var(--red-light); }
 
 /* TABS */
 .nav-tabs {
@@ -273,6 +275,7 @@ th:hover { background:var(--bg4); }
 
 <header class="app-header">
   <div class="logo">SIBRA<span> · Mesa de Operaciones</span></div>
+  <a href="../" class="back-btn">← Market Suite</a>
   <div class="header-sep"></div>
   <div class="drive-status">
     <div class="drive-dot" id="driveDot"></div>
@@ -503,7 +506,7 @@ th:hover { background:var(--bg4); }
       <div class="sec-title" style="margin:0;">Operaciones del día</div>
       <div style="font-size:11px;color:var(--text3);margin-top:4px;" id="histFecha"></div>
     </div>
-    <button class="btn btn-secondary btn-sm" onclick="cargarOperacionesSheets()">↻ Actualizar</button>
+    <button class="btn btn-secondary btn-sm" onclick="cargarOperacionesSheets(true)">↻ Actualizar</button>
   </div>
 
   <div class="kpi-row" id="histKpis">
@@ -529,13 +532,13 @@ th:hover { background:var(--bg4); }
 <div id="toast">✓ Enviado — pegalo en WhatsApp</div>
 <input type="file" id="fileInput" style="display:none;" accept=".xlsx,.xls" />
 
+<script src="../shared/sibra-auth.js"></script>
+<script src="../shared/sibra-cache.js"></script>
 <script>
 // ═══════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════
 const WA_NUMBER    = '5493794406315';
-const CLIENT_ID    = '891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com';
-const SCOPES       = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets';
 const SHEET_ID     = '17QqvU-WdCwfrTkRvkX_kDbSTmPTlUgYrLWWZXm-avEw';
 const SHEET_NAME   = 'Hoja 1';
 const SENT_KEY_V   = 'sibra_sent_ventas';
@@ -611,39 +614,16 @@ function initNav() {
 }
 
 // ═══════════════════════════════════════════
-//  DRIVE AUTH
+//  DRIVE AUTH — sesión compartida (ver shared/sibra-auth.js)
 // ═══════════════════════════════════════════
 function driveAuth() {
-  const redirectUri = location.href.split('?')[0].split('#')[0];
-  const state = Math.random().toString(36).slice(2);
-  sessionStorage.setItem('oauth_state', state);
-  const params = new URLSearchParams({
-    client_id:CLIENT_ID, redirect_uri:redirectUri, response_type:'token',
-    scope:SCOPES, state, prompt:'select_account',
-  });
-  const popup = window.open('https://accounts.google.com/o/oauth2/v2/auth?'+params,'googleOAuth','width=520,height=640,left=200,top=100');
-  const timer = setInterval(()=>{
-    try {
-      const url=popup.location.href;
-      if(url.includes('access_token')||url.includes('error')) {
-        clearInterval(timer); popup.close();
-        const hash=new URLSearchParams(new URL(url).hash.slice(1));
-        if(hash.get('error')){log('❌ Auth error: '+hash.get('error'),'log-err');return;}
-        setToken(hash.get('access_token'),parseInt(hash.get('expires_in')||'3600'));
-      }
-    } catch(e){}
-    if(popup.closed) clearInterval(timer);
-  },500);
-}
-function setToken(t,expiresIn) {
-  token=t;
-  localStorage.setItem('sibra_token',t);
-  localStorage.setItem('sibra_token_exp',new Date(Date.now()+expiresIn*1000).toISOString());
-  updateDriveUI(true); log('✅ Drive + Sheets conectado','log-ok');
+  SibraAuth.connect().then(t => {
+    token = t; updateDriveUI(true); log('✅ Drive + Sheets conectado', 'log-ok');
+  }).catch(e => log('❌ Auth error: ' + e.message, 'log-err'));
 }
 function restoreToken() {
-  const t=localStorage.getItem('sibra_token'), exp=localStorage.getItem('sibra_token_exp');
-  if(t&&exp&&new Date(exp)>new Date()){token=t;updateDriveUI(true);}
+  const t = SibraAuth.getToken();
+  if (t) { token = t; updateDriveUI(true); }
 }
 function updateDriveUI(ok) {
   $('driveDot').className='drive-dot'+(ok?' connected':'');
@@ -721,12 +701,14 @@ async function sheetsEnsureHeader() {
   } catch(e){ log('⚠ No se pudo verificar encabezado: '+e.message,'log-warn'); }
 }
 
-async function cargarOperacionesSheets() {
+async function cargarOperacionesSheets(fresh=false) {
   if(!token){log('⚠ Conectá Drive primero','log-warn');return;}
   try {
     setStatus('operaciones','loading','Leyendo...');
     await sheetsEnsureHeader();
-    const data=await sheetsGet(SHEET_NAME+'!A2:J');
+    const cacheKey=`sheet_${SHEET_ID}_${SHEET_NAME}_A2J`;
+    let data=!fresh && SibraCache.get(cacheKey,30);
+    if(!data){ data=await sheetsGet(SHEET_NAME+'!A2:J'); SibraCache.set(cacheKey,data); }
     const rows=data.values||[];
     const hoy=fechaHoy();
 
@@ -736,6 +718,7 @@ async function cargarOperacionesSheets() {
       if(firstDate && firstDate!==hoy) {
         log(`🔄 Datos de otro día (${firstDate}). Limpiando hoja...`,'log-warn');
         await sheetsClear();
+        SibraCache.invalidate(cacheKey);
         operHoy=[];
         log('✅ Hoja limpiada para el nuevo día','log-ok');
       } else {
@@ -770,6 +753,7 @@ async function registrarOperacion(tipo, alyc, comitente, ticker, cantidad, preci
   const row=[hoy,hora,tipo,alyc,comitente,cliente,ticker,cantidad,precioSpot,montoARS];
   try {
     await sheetsAppend([row]);
+    SibraCache.invalidate(`sheet_${SHEET_ID}_${SHEET_NAME}_A2J`);
     operHoy.push({fecha:hoy,hora,tipo,alyc,comitente,cliente,ticker,cantidad,precioSpot,montoARS});
     $('kpiOps').textContent=operHoy.length;
     renderHistorial();

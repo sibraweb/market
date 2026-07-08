@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Raleway:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="../shared/sibra-auth.js"></script>
+<script src="../shared/sibra-cache.js"></script>
 <style>
 :root {
   --red: #E10600;
@@ -56,6 +58,8 @@ body {
   color: var(--red);
 }
 .logo span { color: var(--text); font-weight: 300; }
+.back-btn { background:transparent; border:1px solid var(--border2); color:var(--text2); padding:5px 12px; border-radius:4px; cursor:pointer; font-family:var(--font-main); font-size:11px; text-decoration:none; display:flex; align-items:center; gap:5px; transition:all .2s; }
+.back-btn:hover { border-color:var(--red); color:var(--red-light); }
 .header-sep { flex: 1; }
 .drive-status {
   display: flex; align-items: center; gap: 8px;
@@ -841,6 +845,7 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
 <!-- HEADER -->
 <header class="app-header">
   <div class="logo">SIBRA<span> · Rotador de Carteras</span></div>
+  <a href="../" class="back-btn">← Market Suite</a>
   <div class="header-sep"></div>
   <div class="drive-status">
     <div class="drive-dot" id="driveDot"></div>
@@ -1816,57 +1821,18 @@ function limpiarFiltroGlobal() {
 
 
 // ══════════════════════════════════════════
-//  GOOGLE OAUTH
+//  GOOGLE OAUTH — sesión compartida (ver shared/sibra-auth.js)
 // ══════════════════════════════════════════
-const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.file',
-].join(' ');
-
 function driveAuth() {
-  const clientId = $('cfgClientId').value.trim() || S.clientId;
-  if (!clientId) { alert('Ingresá el Client ID en el panel de configuración.'); return; }
-  S.clientId = clientId;
-  localStorage.setItem('sibra_client_id', clientId);
-
-  const redirectUri = location.href.split('?')[0].split('#')[0];
-  const state = Math.random().toString(36).slice(2);
-  sessionStorage.setItem('oauth_state', state);
-
-  const params = new URLSearchParams({
-    client_id: clientId, redirect_uri: redirectUri, response_type: 'token',
-    scope: SCOPES, state, prompt: 'select_account', login_hint: 'web.sibra@gmail.com',
-  });
-
-  const popup = window.open('https://accounts.google.com/o/oauth2/v2/auth?' + params, 'googleOAuth', 'width=520,height=640,left=200,top=100');
-  const timer = setInterval(() => {
-    try {
-      const url = popup.location.href;
-      if (url.includes('access_token') || url.includes('error')) {
-        clearInterval(timer); popup.close();
-        const hash = new URLSearchParams(new URL(url).hash.slice(1));
-        const err = hash.get('error');
-        if (err) { log('❌ Auth error: ' + err, 'log-err'); return; }
-        setToken(hash.get('access_token'), parseInt(hash.get('expires_in') || '3600'));
-      }
-    } catch(e) {}
-    if (popup.closed) clearInterval(timer);
-  }, 500);
-}
-
-function setToken(token, expiresIn) {
-  S.token = token;
-  S.tokenExpiry = new Date(Date.now() + expiresIn * 1000);
-  localStorage.setItem('sibra_token', token);
-  localStorage.setItem('sibra_token_exp', S.tokenExpiry.toISOString());
-  updateDriveUI(true);
-  log('✅ Conectado a Google Drive', 'log-ok');
+  SibraAuth.connect().then(t => {
+    S.token = t; S.tokenExpiry = new Date(localStorage.getItem('sibra_token_exp'));
+    updateDriveUI(true); log('✅ Conectado a Google Drive', 'log-ok');
+  }).catch(e => log('❌ Auth error: ' + e.message, 'log-err'));
 }
 
 function driveRevoke() {
+  SibraAuth.logout();
   S.token = null;
-  localStorage.removeItem('sibra_token');
-  localStorage.removeItem('sibra_token_exp');
   updateDriveUI(false);
 }
 
@@ -1881,17 +1847,8 @@ function updateDriveUI(connected) {
 }
 
 function restoreToken() {
-  const DEFAULT_CLIENT_ID = '891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com';
-  const id = localStorage.getItem('sibra_client_id') || DEFAULT_CLIENT_ID;
-  S.clientId = id;
-  if ($('cfgClientId')) $('cfgClientId').value = id;
-  const tok = localStorage.getItem('sibra_token');
-  const exp = localStorage.getItem('sibra_token_exp');
-  if (tok && exp) {
-    const expDate = new Date(exp);
-    if (expDate > new Date()) { S.token = tok; S.tokenExpiry = expDate; updateDriveUI(true); }
-    else driveRevoke();
-  }
+  const tok = SibraAuth.getToken();
+  if (tok) { S.token = tok; S.tokenExpiry = new Date(localStorage.getItem('sibra_token_exp')); updateDriveUI(true); }
 }
 
 async function driveGet(path, params = {}) {
@@ -2821,6 +2778,21 @@ async function procesarArchivos() {
   if (sinCliente.length) log(`⚠ Sin match en clientes (primeros 5): ${sinCliente.slice(0,5).join(', ')}`, 'log-warn');
 
   log(`\n✅ Listo. ${S.posiciones.length} posiciones totales.`, 'log-ok');
+  SibraCache.set('actual_posiciones', S.posiciones);
+}
+
+// Al entrar al módulo, si hay un procesamiento reciente en caché (ver
+// shared/sibra-cache.js) lo restaura sin esperar a que el usuario toque
+// "Procesar" de nuevo — igual sigue pudiendo forzar un refresh real.
+function restoreCachedPosiciones() {
+  const cached = SibraCache.get('actual_posiciones', 300);
+  if (cached && cached.length) {
+    S.posiciones = cached;
+    const kpiP2 = $('kpiPos'); if (kpiP2) kpiP2.textContent = S.posiciones.length;
+    const dr = $('dataResumen'); if (dr) dr.style.display = '';
+    actualizarSelectores();
+    log(`♻ Posiciones restauradas de caché (${S.posiciones.length})`, 'log-ok');
+  }
 }
 
 // ══════════════════════════════════════════
@@ -3834,6 +3806,7 @@ function init() {
   try {
     initNav();
     restoreToken();
+    if (S.token) restoreCachedPosiciones();
     initAC();
     const cid = localStorage.getItem('sibra_client_id');
     if (cid && $('cfgClientId')) $('cfgClientId').value = cid;

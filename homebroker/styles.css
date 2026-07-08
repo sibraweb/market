@@ -46,6 +46,10 @@ header{min-height:94px;display:flex;align-items:center;justify-content:space-bet
   border-bottom:1px solid var(--line);flex-wrap:wrap;gap:var(--space-3,.8rem);padding:var(--space-4,1rem) 0}
 header h1{font-size:var(--fs-h4,1.5rem);margin:.2rem 0}
 header small{color:var(--accent);font-size:var(--fs-micro,.6rem);letter-spacing:var(--ls-label,1px);text-transform:uppercase}
+.back-btn{display:inline-flex;align-items:center;gap:.3rem;background:transparent;border:1px solid var(--line);
+  color:var(--muted);padding:.3rem .7rem;border-radius:var(--radius-sm,4px);font-size:var(--fs-micro,.65rem);
+  text-decoration:none;margin-bottom:.4rem;transition:var(--t-fast,.2s)}
+.back-btn:hover{border-color:var(--accent);color:var(--accent)}
 .header-actions{display:flex;align-items:center;gap:var(--space-3,.8rem)}
 
 .ccy-toggle{display:flex;border:1px solid var(--line);border-radius:var(--radius-md,6px);overflow:hidden}

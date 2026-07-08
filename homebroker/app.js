@@ -3,70 +3,39 @@ const numFmt=n=>new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(
 function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');setTimeout(()=>$('#toast').classList.remove('show'),3000)}
 
 // ══════════════════════════════════════════
-//  GOOGLE OAUTH (mismo patrón que market/actual — implicit flow, client-side)
+//  GOOGLE OAUTH — sesión compartida con el resto de Market Suite
+//  (ver shared/sibra-auth.js, shared/sibra-cache.js)
 // ══════════════════════════════════════════
-const CLIENT_ID = '891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com';
-const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 // Sheet TENENCIAS generado por sibra-brokers-repo/scripts/setup_sheets.py
 const TENENCIAS_SHEET_ID = '1tZVHEgp6nYax-nIdY1WSOYesucrMY_H2rtkXdSwhPAs';
 // MEP = AL30 (ARS) / AL30D (USD). OJO: el endpoint real (según data912.com/openapi.json)
 // es /live/arg_bonds, campos symbol/c — NO /api/live_arg_corp (eso da 404).
 const DATA912_URL = 'https://data912.com/live/arg_bonds';
+const SHEET_CACHE_TTL = 60; // segundos
 
-const S = { token: null, tokenExpiry: null, ccy: 'ARS', mep: null };
+const S = { ccy: 'ARS', mep: null };
 
-function connect() {
-  const redirectUri = location.href.split('?')[0].split('#')[0];
-  const state = Math.random().toString(36).slice(2);
-  sessionStorage.setItem('oauth_state', state);
-  const params = new URLSearchParams({
-    client_id: CLIENT_ID, redirect_uri: redirectUri, response_type: 'token',
-    scope: SCOPES, state, prompt: 'select_account', login_hint: 'web.sibra@gmail.com',
-  });
-  const popup = window.open('https://accounts.google.com/o/oauth2/v2/auth?' + params, 'googleOAuth', 'width=520,height=640,left=200,top=100');
-  const timer = setInterval(() => {
-    try {
-      const url = popup.location.href;
-      if (url.includes('access_token') || url.includes('error')) {
-        clearInterval(timer); popup.close();
-        const hash = new URLSearchParams(new URL(url).hash.slice(1));
-        const err = hash.get('error');
-        if (err) { $('#loginError').textContent = 'Error de autenticación: ' + err; return; }
-        setToken(hash.get('access_token'), parseInt(hash.get('expires_in') || '3600'));
-        showApp();
-      }
-    } catch (e) {}
-    if (popup.closed) clearInterval(timer);
-  }, 500);
+async function connect() {
+  try { await SibraAuth.connect(); showApp(); }
+  catch (e) { $('#loginError').textContent = 'Error de autenticación: ' + e.message; }
 }
 
-function setToken(token, expiresIn) {
-  S.token = token;
-  S.tokenExpiry = new Date(Date.now() + expiresIn * 1000);
-  localStorage.setItem('sibra_hb_token', token);
-  localStorage.setItem('sibra_hb_token_exp', S.tokenExpiry.toISOString());
-}
+function logout() { SibraAuth.logout(); location.reload(); }
 
-function restoreToken() {
-  const tok = localStorage.getItem('sibra_hb_token');
-  const exp = localStorage.getItem('sibra_hb_token_exp');
-  if (tok && exp && new Date(exp) > new Date()) { S.token = tok; S.tokenExpiry = new Date(exp); return true; }
-  localStorage.removeItem('sibra_hb_token'); localStorage.removeItem('sibra_hb_token_exp');
-  return false;
-}
-
-function logout() {
-  S.token = null;
-  localStorage.removeItem('sibra_hb_token'); localStorage.removeItem('sibra_hb_token_exp');
-  location.reload();
-}
-
-async function sheetValues(range) {
-  if (!S.token) throw new Error('No hay token. Conectate con Google primero.');
+async function sheetValues(range, { fresh = false } = {}) {
+  const token = SibraAuth.getToken();
+  if (!token) throw new Error('No hay token. Conectate con Google primero.');
+  const cacheKey = `sheet_${TENENCIAS_SHEET_ID}_${range}`;
+  if (!fresh) {
+    const cached = SibraCache.get(cacheKey, SHEET_CACHE_TTL);
+    if (cached) return cached;
+  }
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${TENENCIAS_SHEET_ID}/values/${range}`;
-  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + S.token } });
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
   if (!r.ok) throw new Error(`Sheets API error ${r.status}: ${await r.text()}`);
-  return r.json();
+  const data = await r.json();
+  SibraCache.set(cacheKey, data);
+  return data;
 }
 
 function rowsFromValues(values) {
@@ -230,8 +199,8 @@ function render() {
   $('#top').innerHTML = rows.slice(0, 8).map(r => `<div class="row"><b>${r.ticker}</b><span>${r.client_name} · ${r.broker_code} ${r.account}</span><strong>${fmtCcy(r.market_value_ars)}</strong></div>`).join('');
 }
 
-async function load() {
-  const data = await sheetValues('CURRENT');
+async function load(fresh = false) {
+  const data = await sheetValues('CURRENT', { fresh });
   allRows = rowsFromValues(data.values);
   refreshFilterLabels(); render();
 }
@@ -240,7 +209,7 @@ $('#clear').onclick = () => {
   FILTER_DEFS.forEach(d => filterState[d.key].clear());
   closeAllMsel(); refreshFilterLabels(); render();
 };
-$('#refresh').onclick = async () => { toast('Actualizando…'); try { await Promise.all([load(), fetchMep()]); toast('Actualizado'); } catch (e) { toast('Error: ' + e.message) } };
+$('#refresh').onclick = async () => { toast('Actualizando…'); try { await Promise.all([load(true), fetchMep()]); toast('Actualizado'); } catch (e) { toast('Error: ' + e.message) } };
 $('#btnConnect').onclick = connect;
 $('#logout').onclick = logout;
 $('#ccyArs').onclick = () => setCcy('ARS');
@@ -252,4 +221,4 @@ async function showApp() {
   try { await Promise.all([load(), fetchMep()]); } catch (e) { toast('Error: ' + e.message) }
 }
 
-if (restoreToken()) showApp();
+if (SibraAuth.getToken()) showApp();
