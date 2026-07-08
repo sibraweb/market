@@ -9,8 +9,9 @@ const CLIENT_ID = '891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleuser
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 // Sheet TENENCIAS generado por sibra-brokers-repo/scripts/setup_sheets.py
 const TENENCIAS_SHEET_ID = '1tZVHEgp6nYax-nIdY1WSOYesucrMY_H2rtkXdSwhPAs';
-// Mismo endpoint que market/rotaciones/data912.js — MEP = AL30 (ARS) / AL30D (USD)
-const DATA912_URL = 'https://data912.com/api/live_arg_corp';
+// MEP = AL30 (ARS) / AL30D (USD). OJO: el endpoint real (según data912.com/openapi.json)
+// es /live/arg_bonds, campos symbol/c — NO /api/live_arg_corp (eso da 404).
+const DATA912_URL = 'https://data912.com/live/arg_bonds';
 
 const S = { token: null, tokenExpiry: null, ccy: 'ARS', mep: null };
 
@@ -75,17 +76,18 @@ function rowsFromValues(values) {
 }
 
 // ══════════════════════════════════════════
-//  MEP (dólar bolsa) — mismo cálculo que market/rotaciones/data912.js
+//  MEP (dólar bolsa) — AL30 (ARS) / AL30D (USD), ambos como vienen de data912
+//  (sin dividir por 100: ese ajuste es para mostrar precio "por cada 100
+//  nominales" en otras pantallas, no aplica al cociente del MEP)
 // ══════════════════════════════════════════
 async function fetchMep() {
   try {
     const r = await fetch(DATA912_URL, { headers: { Accept: 'application/json' } });
     if (!r.ok) throw new Error(`data912 HTTP ${r.status}`);
-    const data = await r.json();
-    const items = Array.isArray(data) ? data : (data.data || data.prices || []);
-    const priceOf = t => {
-      const item = items.find(i => String(i.ticker || i.symbol || '').toUpperCase() === t);
-      return item ? parseFloat(item.price || item.last || item.close || 0) / 100 : null;
+    const items = await r.json();
+    const priceOf = sym => {
+      const item = items.find(i => String(i.symbol || '').toUpperCase() === sym);
+      return item ? parseFloat(item.c || 0) : null;
     };
     const al30 = priceOf('AL30'), al30d = priceOf('AL30D');
     if (al30 && al30d) { S.mep = al30 / al30d; }
@@ -194,6 +196,13 @@ function pctPill(pct) {
   return `<span class="pct-pill ${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${numFmt(v)}%</span>`;
 }
 
+// Etiquetas del grupo de activo tal como vienen de BCCH -> nombre usual
+const ASSET_GROUP_LABELS = {
+  'Titulos Publicos': 'Bonos $',
+  'Titulos Publicos U$S': 'Bonos U$D',
+};
+function assetGroupLabel(g) { return ASSET_GROUP_LABELS[g] || g }
+
 function render() {
   const rows = filteredRows().slice().sort((x, y) => (parseFloat(y.market_value_ars) || 0) - (parseFloat(x.market_value_ars) || 0));
   const total = rows.reduce((a, r) => a + (parseFloat(r.market_value_ars) || 0), 0);
@@ -209,7 +218,7 @@ function render() {
     <td>${r.broker_code}</td>
     <td>${r.account}</td>
     <td><b>${r.ticker}</b></td>
-    <td>${r.asset_group}</td>
+    <td>${assetGroupLabel(r.asset_group)}</td>
     <td class="num">${numFmt(r.quantity)}</td>
     <td class="num">${fmtCcy(r.average_cost, true)}</td>
     <td class="num">${fmtCcy(r.last_price, true)}</td>
