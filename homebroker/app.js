@@ -1,6 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const fmt=n=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(n||0);
-const num=n=>new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(n||0);
+const numFmt=n=>new Intl.NumberFormat('es-AR',{maximumFractionDigits:2}).format(n||0);
 function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');setTimeout(()=>$('#toast').classList.remove('show'),3000)}
 
 // ══════════════════════════════════════════
@@ -10,8 +9,10 @@ const CLIENT_ID = '891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleuser
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 // Sheet TENENCIAS generado por sibra-brokers-repo/scripts/setup_sheets.py
 const TENENCIAS_SHEET_ID = '1tZVHEgp6nYax-nIdY1WSOYesucrMY_H2rtkXdSwhPAs';
+// Mismo endpoint que market/rotaciones/data912.js — MEP = AL30 (ARS) / AL30D (USD)
+const DATA912_URL = 'https://data912.com/api/live_arg_corp';
 
-const S = { token: null, tokenExpiry: null };
+const S = { token: null, tokenExpiry: null, ccy: 'ARS', mep: null };
 
 function connect() {
   const redirectUri = location.href.split('?')[0].split('#')[0];
@@ -74,6 +75,43 @@ function rowsFromValues(values) {
 }
 
 // ══════════════════════════════════════════
+//  MEP (dólar bolsa) — mismo cálculo que market/rotaciones/data912.js
+// ══════════════════════════════════════════
+async function fetchMep() {
+  try {
+    const r = await fetch(DATA912_URL, { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error(`data912 HTTP ${r.status}`);
+    const data = await r.json();
+    const items = Array.isArray(data) ? data : (data.data || data.prices || []);
+    const priceOf = t => {
+      const item = items.find(i => String(i.ticker || i.symbol || '').toUpperCase() === t);
+      return item ? parseFloat(item.price || item.last || item.close || 0) / 100 : null;
+    };
+    const al30 = priceOf('AL30'), al30d = priceOf('AL30D');
+    if (al30 && al30d) { S.mep = al30 / al30d; }
+  } catch (e) { console.warn('[MEP] no se pudo calcular:', e.message); S.mep = null; }
+  $('#mepBadge').textContent = S.mep ? `MEP $${numFmt(S.mep)}` : 'MEP no disponible';
+  $('#mepBadge').classList.remove('hidden');
+}
+
+function fmtCcy(arsValue, unitPrice = false) {
+  const v = parseFloat(arsValue) || 0;
+  const decimals = unitPrice ? 2 : 0;
+  if (S.ccy === 'USD') {
+    if (!S.mep) return '—';
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v / S.mep);
+  }
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v);
+}
+
+function setCcy(ccy) {
+  S.ccy = ccy;
+  $('#ccyArs').classList.toggle('active', ccy === 'ARS');
+  $('#ccyUsd').classList.toggle('active', ccy === 'USD');
+  render();
+}
+
+// ══════════════════════════════════════════
 //  UI
 // ══════════════════════════════════════════
 $$('[data-tab]').forEach(b => b.onclick = () => {
@@ -104,17 +142,37 @@ function filteredRows() {
   );
 }
 
+function pctPill(pct) {
+  const v = parseFloat(pct);
+  if (Number.isNaN(v)) return '<span class="na">—</span>';
+  return `<span class="pct-pill ${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${numFmt(v)}%</span>`;
+}
+
 function render() {
   const rows = filteredRows().slice().sort((x, y) => (parseFloat(y.market_value_ars) || 0) - (parseFloat(x.market_value_ars) || 0));
   const total = rows.reduce((a, r) => a + (parseFloat(r.market_value_ars) || 0), 0);
   const accounts = new Set(rows.map(r => r.broker_code + '|' + r.account)).size;
   const refreshed = rows.map(r => r.refreshed_at).sort().slice(-1)[0] || '—';
-  $('#mTotal').textContent = fmt(total);
+  $('#mTotal').textContent = fmtCcy(total);
   $('#mHoldings').textContent = rows.length;
   $('#mAccounts').textContent = accounts;
   $('#mRefreshed').textContent = refreshed;
-  $('#holdingsBody').innerHTML = rows.map(r => `<tr><td>${r.client_name}</td><td>${r.broker_code}</td><td>${r.account}</td><td><b>${r.ticker}</b></td><td>${r.asset_group}</td><td>${num(r.quantity)}</td><td>${num(r.available_quantity)}</td><td>${num(r.guarantee_quantity)}</td><td>${num(r.last_price)}</td><td>${fmt(r.market_value_ars)}</td><td class="${(parseFloat(r.unrealized_pnl_ars) || 0) >= 0 ? 'pos' : 'neg'}">${fmt(r.unrealized_pnl_ars)}</td></tr>`).join('');
-  $('#top').innerHTML = rows.slice(0, 8).map(r => `<div class="row"><b>${r.ticker}</b><span>${r.client_name} · ${r.broker_code} ${r.account}</span><strong>${fmt(r.market_value_ars)}</strong></div>`).join('');
+
+  $('#holdingsBody').innerHTML = rows.map(r => `<tr>
+    <td>${r.client_name}</td>
+    <td>${r.broker_code}</td>
+    <td>${r.account}</td>
+    <td><b>${r.ticker}</b></td>
+    <td>${r.asset_group}</td>
+    <td class="num">${numFmt(r.quantity)}</td>
+    <td class="num">${fmtCcy(r.average_cost, true)}</td>
+    <td class="num">${fmtCcy(r.last_price, true)}</td>
+    <td class="num">${fmtCcy(r.market_value_ars)}</td>
+    <td class="num">${pctPill(r.unrealized_pnl_pct)}</td>
+    <td class="num na" title="Requiere el histórico de movimientos (FIFO), todavía no implementado">—</td>
+  </tr>`).join('');
+
+  $('#top').innerHTML = rows.slice(0, 8).map(r => `<div class="row"><b>${r.ticker}</b><span>${r.client_name} · ${r.broker_code} ${r.account}</span><strong>${fmtCcy(r.market_value_ars)}</strong></div>`).join('');
 }
 
 async function load() {
@@ -125,13 +183,15 @@ async function load() {
 
 ['#fClient', '#fBroker', '#fAccount', '#fTicker'].forEach(id => $(id).onchange = render);
 $('#clear').onclick = () => { $$('.filters select').forEach(x => [...x.options].forEach(o => o.selected = false)); render() };
-$('#refresh').onclick = async () => { toast('Actualizando…'); try { await load(); toast('Actualizado'); } catch (e) { toast('Error: ' + e.message) } };
+$('#refresh').onclick = async () => { toast('Actualizando…'); try { await Promise.all([load(), fetchMep()]); toast('Actualizado'); } catch (e) { toast('Error: ' + e.message) } };
 $('#btnConnect').onclick = connect;
 $('#logout').onclick = logout;
+$('#ccyArs').onclick = () => setCcy('ARS');
+$('#ccyUsd').onclick = () => setCcy('USD');
 
 async function showApp() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  try { await load(); } catch (e) { toast('Error: ' + e.message) }
+  try { await Promise.all([load(), fetchMep()]); } catch (e) { toast('Error: ' + e.message) }
 }
 
 if (restoreToken()) showApp();

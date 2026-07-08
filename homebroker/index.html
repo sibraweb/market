@@ -1,7 +1,102 @@
-<!doctype html><html lang="es-AR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIBRA INVESTORS · Home Broker</title><link rel="stylesheet" href="tokens/colors.css"><link rel="stylesheet" href="tokens/typography.css"><link rel="stylesheet" href="tokens/spacing.css"><link rel="stylesheet" href="styles.css"></head><body>
-<section id="login" class="login"><div class="login-card"><img class="brand-logo" src="assets/sibra-investors-logo.png" alt="Sibra Investors"><p>SIBRATECH · CARTERAS</p><h1>Home Broker</h1><p class="sub">Conectate con tu cuenta de Google para ver las tenencias consolidadas de todas las cuentas.</p><button id="btnConnect">Conectar con Google</button><div id="loginError"></div></div><div class="hero"><h2>Una vista.<br>Todos los brokers.</h2><p>Tenencias actualizadas por ALyC y cuenta comitente, con la misma lógica que un Home Broker.</p></div></section>
-<div id="app" class="hidden"><aside><img class="brand-logo" src="assets/sibra-investors-logo.png" alt="Sibra Investors"><button data-tab="resumen" class="active">Resumen</button><button data-tab="tenencias">Tenencias</button><button id="logout">Salir</button></aside><main><header><div><small>SIBRATECH · CARTERAS</small><h1>Panel consolidado</h1></div><div><button id="refresh" class="ghost">Actualizar</button></div></header>
-<section class="filters"><label>Cliente<select id="fClient" multiple></select></label><label>ALyC<select id="fBroker" multiple></select></label><label>Comitente<select id="fAccount" multiple></select></label><label>Título<select id="fTicker" multiple></select></label><button id="clear" class="ghost">Limpiar filtros</button></section>
-<section id="tab-resumen" class="tab active"><div class="cards"><article><span>Posición</span><strong id="mTotal">—</strong></article><article><span>Instrumentos</span><strong id="mHoldings">—</strong></article><article><span>Cuentas</span><strong id="mAccounts">—</strong></article><article><span>Última actualización</span><strong id="mRefreshed">—</strong></article></div><div class="box"><h2>Principales tenencias</h2><div id="top"></div></div></section>
-<section id="tab-tenencias" class="tab"><div class="box"><h2>Tenencias actuales</h2><div class="table"><table><thead><tr><th>Cliente</th><th>ALyC</th><th>Comitente</th><th>Ticker</th><th>Tipo</th><th>Cantidad</th><th>Disponible</th><th>Garantía</th><th>Precio</th><th>Valuación</th><th>Resultado</th></tr></thead><tbody id="holdingsBody"></tbody></table></div></div></section>
-<div id="toast"></div></main></div><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SIBRA INVESTORS · Home Broker</title>
+<link rel="stylesheet" href="tokens/colors.css">
+<link rel="stylesheet" href="tokens/typography.css">
+<link rel="stylesheet" href="tokens/spacing.css">
+<link rel="stylesheet" href="tokens/effects.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<section id="login" class="login">
+  <div class="login-card">
+    <img class="brand-logo" src="assets/sibra-investors-logo.png" alt="Sibra Investors">
+    <p class="eyebrow">SIBRATECH · CARTERAS</p>
+    <h1>Home Broker</h1>
+    <p class="sub">Conectate con tu cuenta de Google para ver las tenencias consolidadas de todas las cuentas.</p>
+    <button id="btnConnect">Conectar con Google</button>
+    <div id="loginError"></div>
+  </div>
+  <div class="hero">
+    <h2>Una vista.<br>Todos los brokers.</h2>
+    <p>Tenencias actualizadas por ALyC y cuenta comitente, con la misma lógica que un Home Broker.</p>
+  </div>
+</section>
+
+<div id="app" class="hidden">
+  <aside>
+    <img class="brand-logo" src="assets/sibra-investors-logo.png" alt="Sibra Investors">
+    <button data-tab="resumen" class="active">Resumen</button>
+    <button data-tab="tenencias">Tenencias</button>
+    <button id="logout">Salir</button>
+  </aside>
+  <main>
+    <header>
+      <div><small>SIBRATECH · CARTERAS</small><h1>Panel consolidado</h1></div>
+      <div class="header-actions">
+        <div class="ccy-toggle">
+          <button id="ccyArs" class="ccy active">ARS</button>
+          <button id="ccyUsd" class="ccy">USD MEP</button>
+        </div>
+        <span id="mepBadge" class="mep-badge hidden">MEP $—</span>
+        <button id="refresh" class="ghost">Actualizar</button>
+      </div>
+    </header>
+
+    <section class="filters">
+      <label>Cliente<select id="fClient" multiple></select></label>
+      <label>ALyC<select id="fBroker" multiple></select></label>
+      <label>Comitente<select id="fAccount" multiple></select></label>
+      <label>Título<select id="fTicker" multiple></select></label>
+      <button id="clear" class="ghost">Limpiar filtros</button>
+    </section>
+
+    <section id="tab-resumen" class="tab active">
+      <div class="cards">
+        <article><span>Posición</span><strong id="mTotal">—</strong></article>
+        <article><span>Instrumentos</span><strong id="mHoldings">—</strong></article>
+        <article><span>Cuentas</span><strong id="mAccounts">—</strong></article>
+        <article><span>Última actualización</span><strong id="mRefreshed">—</strong></article>
+      </div>
+      <div class="box">
+        <h2>Principales tenencias</h2>
+        <div id="top"></div>
+      </div>
+    </section>
+
+    <section id="tab-tenencias" class="tab">
+      <div class="box">
+        <h2>Tenencias actuales</h2>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th><th>ALyC</th><th>Comitente</th><th>Ticker</th><th>Tipo</th>
+                <th class="num">Cantidad</th>
+                <th class="num">PPC</th>
+                <th class="num">Precio</th>
+                <th class="num">Valuación</th>
+                <th class="num">Rentabilidad</th>
+                <th class="num">
+                  Plazo prom.
+                  <span class="info-dot" title="Requiere el histórico de movimientos (FIFO), todavía no implementado">?</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="holdingsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div id="toast"></div>
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+/* ============================================================
+   SIBRATECH — EFFECTS: shadows, borders, notch, transitions
+   ============================================================ */
+:root {
+  /* --- Shadows (soft, neutral; brand-tinted on hover) --- */
+  --shadow-nav:    0 2px 8px rgba(0,0,0,0.04);
+  --shadow-card:   0 2px 10px rgba(0,0,0,0.08);
+  --shadow-card-sm:0 2px 8px rgba(0,0,0,0.08);
+  --shadow-hover:  0 8px 25px rgba(225,6,0,0.15);  /* red-tinted lift */
+
+  /* --- Borders --- */
+  --border-1: 1px solid var(--border-hairline);
+  --border-2: 2px solid var(--border-strong);
+  --border-brand-2: 2px solid var(--border-brand);
+
+  /* --- Transitions --- */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1); /* @kind other */
+  --t-fast:  0.2s var(--ease);
+  --t-base:  0.3s var(--ease);
+  --lift:    translateY(-5px); /* @kind other */
+  --nudge:   translateX(5px); /* @kind other */
+
+  /* --- Signature notched corner (top-right + bottom-left cut) --- */
+  --clip-notch: polygon(
+    0 0,
+    calc(100% - var(--notch)) 0,
+    100% var(--notch),
+    100% 100%,
+    var(--notch) 100%,
+    0 calc(100% - var(--notch))
+  );
+}
