@@ -1,0 +1,58 @@
+/* ============================================================
+   SIBRATECH GROUP — COLOR TOKENS
+   Source of truth: official brand manual ("Identidad Visual
+   Definitiva — Sibratech Group"). Palette is red + a 5-step
+   neutral ladder. No other hues.
+   ============================================================ */
+:root {
+  /* --- Official palette (brand manual) --- */
+  --red-500:  #E10600;   /* brand red */
+  --gray-700: #5A6060;   /* dark warm gray (titles 2nd, text) */
+  --black:    #0B0B0B;   /* corporate black */
+  --gray-400: #9AA0A0;   /* medium gray */
+  --gray-100: #F5F5F5;   /* light gray surface */
+  --white:    #FFFFFF;   
+
+  /* --- Derived working shades (UI needs, kept close to palette) --- */
+  --red-600:  #b80500;   /* red hover / pressed */
+  --red-700:  #8f0400;   /* deep red */
+  --red-050:  #fdecea;   /* red tint wash */
+  --ink-900:  #0B0B0B;   /* alias → corporate black */
+  --ink-800:  #1a1a1a;   /* near-black headings / strong text */
+  --gray-600: #666666;   /* body copy mid-gray */
+  --gray-500: #9AA0A0;   /* alias → medium gray (muted / meta) */
+  --gray-300: #d9dada;   /* disabled / track */
+  --gray-200: #eaeaea;   /* hairline border */
+  --gray-050: #f9f9f9;   /* alt page surface */
+  --ink-soft: #2a2d2d;   /* near-black for long text */
+
+  /* --- Semantic aliases --- */
+  --color-brand:        var(--red-500);
+  --color-brand-hover:  var(--red-600);
+  --color-brand-deep:   var(--red-700);
+  --color-brand-tint:   var(--red-050);
+
+  --text-strong:   var(--black);      /* headings */
+  --text-body:     var(--gray-700);   /* paragraph copy */
+  --text-muted:    var(--gray-400);   /* meta / captions */
+  --text-on-dark:  var(--white);
+  --text-on-brand: var(--white);
+  --text-accent:   var(--red-500);    /* the one red word */
+
+  --surface-page:   var(--white);
+  --surface-alt:    var(--gray-100);  /* #F5F5F5 alt band */
+  --surface-card:   var(--white);
+  --surface-dark:   var(--black);     /* dark sections / footer */
+  --surface-darker: #050505;
+
+  --border-hairline: var(--gray-200);
+  --border-strong:   var(--black);
+  --border-brand:    var(--red-500);
+
+  /* On-dark surface helpers */
+  --field-on-dark-bg:     rgba(255,255,255,0.08);
+  --field-on-dark-bg-hi:  rgba(255,255,255,0.14);
+  --field-on-dark-border: rgba(255,255,255,0.18);
+  --field-on-dark-place:  rgba(255,255,255,0.48);
+  --divider-on-dark:      rgba(255,255,255,0.10);
+}

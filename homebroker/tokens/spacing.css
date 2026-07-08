@@ -1,0 +1,38 @@
+/* ============================================================
+   SIBRATECH — SPACING & LAYOUT TOKENS
+   Section rhythm is generous: 5rem vertical, 5% horizontal
+   gutters. Cards use modest 6–8px radii; buttons are notched,
+   not rounded (see effects.css).
+   ============================================================ */
+:root {
+  /* --- Spacing scale --- */
+  --space-0:   0;
+  --space-1:   0.3rem;
+  --space-2:   0.5rem;
+  --space-3:   0.8rem;
+  --space-4:   1rem;
+  --space-5:   1.5rem;
+  --space-6:   2rem;
+  --space-7:   2.5rem;
+  --space-8:   3rem;
+  --space-10:  4rem;
+  --space-12:  5rem;   /* section padding-block */
+
+  /* --- Page gutters --- */
+  --gutter:        5%;
+  --nav-height:    80px;
+
+  /* --- Common gaps --- */
+  --gap-sm:  1rem;
+  --gap-md:  2rem;
+  --gap-lg:  3rem;
+
+  /* --- Radii (sharp brand; cards softly rounded) --- */
+  --radius-none: 0;
+  --radius-sm:   4px;
+  --radius-md:   6px;   /* cards, value blocks */
+  --radius-lg:   8px;   /* hero image, large surfaces */
+
+  /* --- Notch geometry (signature clipped button corner) --- */
+  --notch: 8px;
+}

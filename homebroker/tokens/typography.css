@@ -1,0 +1,50 @@
+/* ============================================================
+   SIBRATECH — TYPOGRAPHY TOKENS
+   ============================================================ */
+:root {
+  /* --- Families --- */
+  /* --- Families (brand manual: Century Gothic titles+body, Franklin Gothic aux,
+     Engravers Gothic logo — substituted with Jost / Libre Franklin) --- */
+  --font-display: 'Jost', 'Century Gothic', system-ui, sans-serif; /* títulos (Century Gothic Bold) */
+  --font-body:    'Jost', 'Century Gothic', system-ui, sans-serif; /* cuerpo (Century Gothic Regular) */
+  --font-aux:     'Libre Franklin', system-ui, sans-serif;         /* auxiliar (Franklin Gothic Book) */
+  --font-logo:    'Jost', 'Century Gothic', system-ui, sans-serif; /* logotipo (Engravers Gothic, caps+tracking) */
+
+  /* --- Weights --- */
+  --fw-light:     300; /* @kind font */
+  --fw-regular:   400; /* @kind font */
+  --fw-medium:    500; /* @kind font */
+  --fw-semibold:  600; /* @kind font */
+  --fw-bold:      700; /* @kind font */
+  --fw-extrabold: 800; /* @kind font */
+  --fw-black:     900; /* @kind font */
+
+  /* --- Type scale (rem) --- */
+  --fs-hero:    3rem;    /* H1 hero */
+  --fs-h2:      2.8rem;  /* section heads */
+  --fs-h3:      1.8rem;  /* sub-section */
+  --fs-h4:      1rem;    /* card titles */
+  --fs-lead:    1rem;    /* intro paragraph */
+  --fs-body:    0.95rem; /* default copy */
+  --fs-sm:      0.85rem; /* dense copy / meta */
+  --fs-label:   0.7rem;  /* uppercase nav / button labels */
+  --fs-micro:   0.6rem;  /* tiny eyebrow labels */
+
+  /* --- Line heights --- */
+  --lh-tight:   1.15;  /* @kind font */
+  --lh-snug:    1.4;   /* @kind font */
+  --lh-body:    1.6;   /* @kind font */
+  --lh-relaxed: 1.8;   /* @kind font */
+
+  /* --- Letter spacing ---
+     Display headings tighten; uppercase labels open up. */
+  --ls-display: -1px;   /* @kind font */
+  --ls-tight:   -0.5px; /* @kind font */
+  --ls-label:   1px;    /* @kind font */
+  --ls-wide:    1.5px;  /* @kind font */
+  --ls-wider:   2px;    /* @kind font */
+
+  /* --- Semantic roles --- */
+  --text-display-font: var(--font-display);
+  --text-body-font:    var(--font-body);
+}
