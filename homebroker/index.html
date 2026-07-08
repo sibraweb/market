@@ -47,11 +47,39 @@
       </div>
     </header>
 
-    <section class="filters">
-      <label>Cliente<select id="fClient" multiple></select></label>
-      <label>ALyC<select id="fBroker" multiple></select></label>
-      <label>Comitente<select id="fAccount" multiple></select></label>
-      <label>Título<select id="fTicker" multiple></select></label>
+    <section class="filters" id="filtersBar">
+      <div class="msel" data-key="clients">
+        <span class="msel-label">Cliente</span>
+        <button type="button" class="msel-btn">Todos</button>
+        <div class="msel-panel hidden">
+          <input type="text" class="msel-search" placeholder="Buscar cliente…">
+          <div class="msel-options"></div>
+        </div>
+      </div>
+      <div class="msel" data-key="brokers">
+        <span class="msel-label">ALyC</span>
+        <button type="button" class="msel-btn">Todos</button>
+        <div class="msel-panel hidden">
+          <input type="text" class="msel-search" placeholder="Buscar ALyC…">
+          <div class="msel-options"></div>
+        </div>
+      </div>
+      <div class="msel" data-key="accounts">
+        <span class="msel-label">Comitente</span>
+        <button type="button" class="msel-btn">Todos</button>
+        <div class="msel-panel hidden">
+          <input type="text" class="msel-search" placeholder="Buscar comitente…">
+          <div class="msel-options"></div>
+        </div>
+      </div>
+      <div class="msel" data-key="tickers">
+        <span class="msel-label">Título</span>
+        <button type="button" class="msel-btn">Todos</button>
+        <div class="msel-panel hidden">
+          <input type="text" class="msel-search" placeholder="Buscar título…">
+          <div class="msel-options"></div>
+        </div>
+      </div>
       <button id="clear" class="ghost">Limpiar filtros</button>
     </section>
 

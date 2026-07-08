@@ -121,24 +121,70 @@ $$('[data-tab]').forEach(b => b.onclick = () => {
 
 let allRows = [];
 
-function options(el, arr) { el.innerHTML = arr.map(x => `<option value="${x}">${x}</option>`).join('') }
+// ══════════════════════════════════════════
+//  Filtros: multiselect con buscador (reemplaza <select multiple>)
+// ══════════════════════════════════════════
+const FILTER_DEFS = [
+  { key: 'clients', field: 'client_name', label: 'Cliente' },
+  { key: 'brokers', field: 'broker_code', label: 'ALyC' },
+  { key: 'accounts', field: 'account', label: 'Comitente' },
+  { key: 'tickers', field: 'ticker', label: 'Título' },
+];
+const filterState = Object.fromEntries(FILTER_DEFS.map(d => [d.key, new Set()]));
 
-function loadFilters() {
-  options($('#fClient'), [...new Set(allRows.map(r => r.client_name).filter(Boolean))].sort());
-  options($('#fBroker'), [...new Set(allRows.map(r => r.broker_code).filter(Boolean))].sort());
-  options($('#fAccount'), [...new Set(allRows.map(r => r.account).filter(Boolean))].sort());
-  options($('#fTicker'), [...new Set(allRows.map(r => r.ticker).filter(Boolean))].sort());
+function closeAllMsel() { $$('.msel-panel').forEach(p => p.classList.add('hidden')) }
+
+function buildMultiSelects() {
+  FILTER_DEFS.forEach(def => {
+    const root = $(`.msel[data-key="${def.key}"]`);
+    const btn = root.querySelector('.msel-btn');
+    const panel = root.querySelector('.msel-panel');
+    const search = root.querySelector('.msel-search');
+    const optsEl = root.querySelector('.msel-options');
+
+    function optionValues() { return [...new Set(allRows.map(r => r[def.field]).filter(Boolean))].sort() }
+
+    function renderOptions(filterText = '') {
+      const q = filterText.toLowerCase();
+      const vals = optionValues().filter(v => v.toLowerCase().includes(q));
+      optsEl.innerHTML = vals.length
+        ? vals.map(v => `<label class="msel-opt"><input type="checkbox" value="${v}" ${filterState[def.key].has(v) ? 'checked' : ''}> ${v}</label>`).join('')
+        : '<div class="msel-empty">Sin resultados</div>';
+    }
+
+    function updateBtnLabel() {
+      const n = filterState[def.key].size;
+      btn.textContent = n ? `${def.label} (${n})` : def.label + ': Todos';
+      btn.classList.toggle('active', n > 0);
+    }
+
+    btn.onclick = e => {
+      e.stopPropagation();
+      const wasOpen = !panel.classList.contains('hidden');
+      closeAllMsel();
+      if (!wasOpen) { search.value = ''; renderOptions(); panel.classList.remove('hidden'); search.focus(); }
+    };
+    search.oninput = () => renderOptions(search.value);
+    optsEl.onchange = e => {
+      if (e.target.type !== 'checkbox') return;
+      if (e.target.checked) filterState[def.key].add(e.target.value); else filterState[def.key].delete(e.target.value);
+      updateBtnLabel(); render();
+    };
+    panel.onclick = e => e.stopPropagation();
+
+    def._update = updateBtnLabel;
+  });
+  document.addEventListener('click', closeAllMsel);
 }
 
-function selected(id) { return [...$(id).selectedOptions].map(o => o.value) }
+function refreshFilterLabels() { FILTER_DEFS.forEach(d => d._update()) }
 
 function filteredRows() {
-  const c = selected('#fClient'), b = selected('#fBroker'), a = selected('#fAccount'), t = selected('#fTicker');
   return allRows.filter(r =>
-    (!c.length || c.includes(r.client_name)) &&
-    (!b.length || b.includes(r.broker_code)) &&
-    (!a.length || a.includes(r.account)) &&
-    (!t.length || t.includes(r.ticker))
+    (!filterState.clients.size || filterState.clients.has(r.client_name)) &&
+    (!filterState.brokers.size || filterState.brokers.has(r.broker_code)) &&
+    (!filterState.accounts.size || filterState.accounts.has(r.account)) &&
+    (!filterState.tickers.size || filterState.tickers.has(r.ticker))
   );
 }
 
@@ -178,11 +224,13 @@ function render() {
 async function load() {
   const data = await sheetValues('CURRENT');
   allRows = rowsFromValues(data.values);
-  loadFilters(); render();
+  refreshFilterLabels(); render();
 }
 
-['#fClient', '#fBroker', '#fAccount', '#fTicker'].forEach(id => $(id).onchange = render);
-$('#clear').onclick = () => { $$('.filters select').forEach(x => [...x.options].forEach(o => o.selected = false)); render() };
+$('#clear').onclick = () => {
+  FILTER_DEFS.forEach(d => filterState[d.key].clear());
+  closeAllMsel(); refreshFilterLabels(); render();
+};
 $('#refresh').onclick = async () => { toast('Actualizando…'); try { await Promise.all([load(), fetchMep()]); toast('Actualizado'); } catch (e) { toast('Error: ' + e.message) } };
 $('#btnConnect').onclick = connect;
 $('#logout').onclick = logout;
@@ -191,6 +239,7 @@ $('#ccyUsd').onclick = () => setCcy('USD');
 
 async function showApp() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  buildMultiSelects();
   try { await Promise.all([load(), fetchMep()]); } catch (e) { toast('Error: ' + e.message) }
 }
 
