@@ -193,9 +193,28 @@ function caucionTomadoraArs(rows) {
   return ars + (S.mep ? usd * S.mep : 0);
 }
 
+// Neta/bruta por cuenta (broker_code|account), sobre TODA la cartela de esa
+// cuenta (allRows, no filteredRows) — igual que market/actual: el % de cada
+// posición es sobre el total real de su cuenta, no sobre el subconjunto filtrado.
+function accountTotals() {
+  const groups = new Map();
+  allRows.forEach(r => {
+    const key = r.broker_code + '|' + r.account;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  const totals = new Map();
+  groups.forEach((rows, key) => {
+    const neta = rows.reduce((s, r) => s + (parseFloat(r.market_value_ars) || 0), 0);
+    totals.set(key, { neta, bruta: neta + caucionTomadoraArs(rows) });
+  });
+  return totals;
+}
+
 function render() {
   const rows = filteredRows().slice().sort((x, y) => (parseFloat(y.market_value_ars) || 0) - (parseFloat(x.market_value_ars) || 0));
   const total = rows.reduce((a, r) => a + (parseFloat(r.market_value_ars) || 0), 0);
+  const totals = accountTotals();
   const accounts = new Set(rows.map(r => r.broker_code + '|' + r.account)).size;
   const refreshed = rows.map(r => r.refreshed_at).sort().slice(-1)[0] || '—';
   const neta = total;
@@ -207,7 +226,12 @@ function render() {
   $('#mAccounts').textContent = accounts;
   $('#mRefreshed').textContent = refreshed;
 
-  $('#holdingsBody').innerHTML = rows.map(r => `<tr>
+  $('#holdingsBody').innerHTML = rows.map(r => {
+    const acc = totals.get(r.broker_code + '|' + r.account) || { neta: 0, bruta: 0 };
+    const valor = parseFloat(r.market_value_ars) || 0;
+    const pctNeto = acc.neta ? valor / acc.neta * 100 : 0;
+    const pctBruto = acc.bruta ? valor / acc.bruta * 100 : 0;
+    return `<tr>
     <td>${r.client_name}</td>
     <td>${r.broker_code}</td>
     <td>${r.account}</td>
@@ -218,8 +242,11 @@ function render() {
     <td class="num">${fmtCcy(r.last_price, true)}</td>
     <td class="num">${fmtCcy(r.market_value_ars)}</td>
     <td class="num">${pctPill(r.unrealized_pnl_pct)}</td>
+    <td class="num">${numFmt(pctNeto)}%</td>
+    <td class="num">${numFmt(pctBruto)}%</td>
     <td class="num na" title="Requiere el histórico de movimientos (FIFO), todavía no implementado">—</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 
   $('#top').innerHTML = rows.slice(0, 8).map(r => `<div class="row"><b>${r.ticker}</b><span>${r.client_name} · ${r.broker_code} ${r.account}</span><strong>${fmtCcy(r.market_value_ars)}</strong></div>`).join('');
 
