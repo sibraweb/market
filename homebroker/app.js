@@ -182,16 +182,17 @@ const ASSET_GROUP_LABELS = {
 };
 function assetGroupLabel(g) { return ASSET_GROUP_LABELS[g] || g }
 
-// Cauciones TOMADORA vigentes de las cuentas filtradas, pesificadas al MEP —
-// mismo criterio que market/actual: bruta = neta + caución tomadora (la
+// Cauciones TOMADORA vigentes de las cuentas filtradas — mismo criterio que
+// market/actual: bruta = neta + caución tomadora pesificada al MEP (la
 // colocadora es plata prestada por el cliente, no apalancamiento, no infla la bruta).
-function caucionTomadoraArs(rows) {
+function caucionTomadoraTotals(rows) {
   const cuentas = new Set(rows.map(r => r.broker_code + '|' + r.account));
   const vigentes = allCauciones.filter(c => c.status === 'VIGENTE' && c.side === 'TOMADORA' && cuentas.has(c.broker_code + '|' + c.account));
   const ars = vigentes.filter(c => c.currency === 'ARS').reduce((s, c) => s + (parseFloat(c.capital) || 0), 0);
   const usd = vigentes.filter(c => c.currency === 'USD').reduce((s, c) => s + (parseFloat(c.capital) || 0), 0);
-  return ars + (S.mep ? usd * S.mep : 0);
+  return { ars, usd, totalArs: ars + (S.mep ? usd * S.mep : 0) };
 }
+function caucionTomadoraArs(rows) { return caucionTomadoraTotals(rows).totalArs; }
 
 // Neta/bruta por cuenta (broker_code|account), sobre TODA la cartela de esa
 // cuenta (allRows, no filteredRows) — igual que market/actual: el % de cada
@@ -218,10 +219,15 @@ function render() {
   const accounts = new Set(rows.map(r => r.broker_code + '|' + r.account)).size;
   const refreshed = rows.map(r => r.refreshed_at).sort().slice(-1)[0] || '—';
   const neta = total;
-  const bruta = neta + caucionTomadoraArs(rows);
+  const caucion = caucionTomadoraTotals(rows);
+  const bruta = neta + caucion.totalArs;
   $('#mTotal').textContent = fmtCcy(total);
   $('#mNeta').textContent = fmtCcy(neta);
   $('#mBruta').textContent = fmtCcy(bruta);
+  $('#mNetaTen').textContent = fmtCcy(neta);
+  $('#mBrutaTen').textContent = fmtCcy(bruta);
+  $('#mCaucionArs').textContent = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(caucion.ars);
+  $('#mCaucionUsd').textContent = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(caucion.usd);
   $('#mHoldings').textContent = rows.length;
   $('#mAccounts').textContent = accounts;
   $('#mRefreshed').textContent = refreshed;
@@ -277,12 +283,18 @@ function renderCauciones() {
 }
 
 async function load(fresh = false) {
-  const [holdings, cauciones] = await Promise.all([
-    sheetValues(TENENCIAS_SHEET_ID, 'CURRENT', { fresh }),
-    sheetValues(CAUCIONES_SHEET_ID, 'CURRENT', { fresh }),
-  ]);
+  const holdings = await sheetValues(TENENCIAS_SHEET_ID, 'CURRENT', { fresh });
   allRows = rowsFromValues(holdings.values);
-  allCauciones = rowsFromValues(cauciones.values);
+  try {
+    const cauciones = await sheetValues(CAUCIONES_SHEET_ID, 'CURRENT', { fresh });
+    allCauciones = rowsFromValues(cauciones.values);
+  } catch (e) {
+    // No dejamos que un problema en Cauciones (sheet nueva, puede no existir
+    // todavía o fallar por separado) tumbe también las Tenencias.
+    console.warn('[Cauciones] no se pudo cargar:', e.message);
+    allCauciones = [];
+    toast('No se pudieron cargar las cauciones: ' + e.message);
+  }
   refreshFilterLabels(); render();
 }
 
