@@ -32,6 +32,7 @@
     <img class="brand-logo" src="assets/sibra-investors-logo.png" alt="Sibra Investors">
     <button data-tab="resumen" class="active">Resumen</button>
     <button data-tab="tenencias">Tenencias</button>
+    <button data-tab="cauciones">Cauciones</button>
     <button id="logout">Salir</button>
   </aside>
   <main>
@@ -86,6 +87,13 @@
     <section id="tab-resumen" class="tab active">
       <div class="cards">
         <article><span>Posición</span><strong id="mTotal">—</strong></article>
+        <article><span>Tenencia neta</span><strong id="mNeta">—</strong></article>
+        <article>
+          <span>Tenencia bruta
+            <span class="info-dot" title="Neta + caución tomadora vigente (pesificada al MEP) — mismo criterio que market/actual">?</span>
+          </span>
+          <strong id="mBruta">—</strong>
+        </article>
         <article><span>Instrumentos</span><strong id="mHoldings">—</strong></article>
         <article><span>Cuentas</span><strong id="mAccounts">—</strong></article>
         <article><span>Última actualización</span><strong id="mRefreshed">—</strong></article>
@@ -116,6 +124,42 @@
               </tr>
             </thead>
             <tbody id="holdingsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-cauciones" class="tab">
+      <div class="box">
+        <h2>Cauciones en pesos</h2>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th><th>ALyC</th><th>Comitente</th><th>Lado</th>
+                <th>Inicio</th><th>Vencimiento</th>
+                <th class="num">Capital</th><th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="caucionesArsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="box">
+        <h2>
+          Cauciones en dólares
+          <span class="info-dot" title="Estimadas a partir de la actividad (comprobante TCTU) — todavía no hay cuenta corriente en dólares conectada, es un valor provisorio">?</span>
+        </h2>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th><th>ALyC</th><th>Comitente</th><th>Lado</th>
+                <th>Inicio</th><th>Vencimiento</th>
+                <th class="num">Capital</th><th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="caucionesUsdBody"></tbody>
           </table>
         </div>
       </div>

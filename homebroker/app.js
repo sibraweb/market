@@ -6,8 +6,9 @@ function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');se
 //  GOOGLE OAUTH — sesión compartida con el resto de Market Suite
 //  (ver shared/sibra-auth.js, shared/sibra-cache.js)
 // ══════════════════════════════════════════
-// Sheet TENENCIAS generado por sibra-brokers-repo/scripts/setup_sheets.py
+// Sheets generados por sibra-brokers-repo/scripts/setup_sheets.py
 const TENENCIAS_SHEET_ID = '1tZVHEgp6nYax-nIdY1WSOYesucrMY_H2rtkXdSwhPAs';
+const CAUCIONES_SHEET_ID = '1mSEmdabwij0ySAUtXTN_eXvbf17dmK-Gs6ze_5N3bcs';
 // MEP = AL30 (ARS) / AL30D (USD). OJO: el endpoint real (según data912.com/openapi.json)
 // es /live/arg_bonds, campos symbol/c — NO /api/live_arg_corp (eso da 404).
 const DATA912_URL = 'https://data912.com/live/arg_bonds';
@@ -22,15 +23,15 @@ async function connect() {
 
 function logout() { SibraAuth.logout(); location.reload(); }
 
-async function sheetValues(range, { fresh = false } = {}) {
+async function sheetValues(sheetId, range, { fresh = false } = {}) {
   const token = SibraAuth.getToken();
   if (!token) throw new Error('No hay token. Conectate con Google primero.');
-  const cacheKey = `sheet_${TENENCIAS_SHEET_ID}_${range}`;
+  const cacheKey = `sheet_${sheetId}_${range}`;
   if (!fresh) {
     const cached = SibraCache.get(cacheKey, SHEET_CACHE_TTL);
     if (cached) return cached;
   }
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${TENENCIAS_SHEET_ID}/values/${range}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`;
   const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
   if (!r.ok) throw new Error(`Sheets API error ${r.status}: ${await r.text()}`);
   const data = await r.json();
@@ -91,6 +92,7 @@ $$('[data-tab]').forEach(b => b.onclick = () => {
 });
 
 let allRows = [];
+let allCauciones = [];
 
 // ══════════════════════════════════════════
 //  Filtros: multiselect con buscador (reemplaza <select multiple>)
@@ -159,6 +161,14 @@ function filteredRows() {
   );
 }
 
+function filteredCauciones() {
+  return allCauciones.filter(c =>
+    (!filterState.clients.size || filterState.clients.has(c.client_name)) &&
+    (!filterState.brokers.size || filterState.brokers.has(c.broker_code)) &&
+    (!filterState.accounts.size || filterState.accounts.has(c.account))
+  );
+}
+
 function pctPill(pct) {
   const v = parseFloat(pct);
   if (Number.isNaN(v)) return '<span class="na">—</span>';
@@ -172,12 +182,27 @@ const ASSET_GROUP_LABELS = {
 };
 function assetGroupLabel(g) { return ASSET_GROUP_LABELS[g] || g }
 
+// Cauciones TOMADORA vigentes de las cuentas filtradas, pesificadas al MEP —
+// mismo criterio que market/actual: bruta = neta + caución tomadora (la
+// colocadora es plata prestada por el cliente, no apalancamiento, no infla la bruta).
+function caucionTomadoraArs(rows) {
+  const cuentas = new Set(rows.map(r => r.broker_code + '|' + r.account));
+  const vigentes = allCauciones.filter(c => c.status === 'VIGENTE' && c.side === 'TOMADORA' && cuentas.has(c.broker_code + '|' + c.account));
+  const ars = vigentes.filter(c => c.currency === 'ARS').reduce((s, c) => s + (parseFloat(c.capital) || 0), 0);
+  const usd = vigentes.filter(c => c.currency === 'USD').reduce((s, c) => s + (parseFloat(c.capital) || 0), 0);
+  return ars + (S.mep ? usd * S.mep : 0);
+}
+
 function render() {
   const rows = filteredRows().slice().sort((x, y) => (parseFloat(y.market_value_ars) || 0) - (parseFloat(x.market_value_ars) || 0));
   const total = rows.reduce((a, r) => a + (parseFloat(r.market_value_ars) || 0), 0);
   const accounts = new Set(rows.map(r => r.broker_code + '|' + r.account)).size;
   const refreshed = rows.map(r => r.refreshed_at).sort().slice(-1)[0] || '—';
+  const neta = total;
+  const bruta = neta + caucionTomadoraArs(rows);
   $('#mTotal').textContent = fmtCcy(total);
+  $('#mNeta').textContent = fmtCcy(neta);
+  $('#mBruta').textContent = fmtCcy(bruta);
   $('#mHoldings').textContent = rows.length;
   $('#mAccounts').textContent = accounts;
   $('#mRefreshed').textContent = refreshed;
@@ -197,11 +222,40 @@ function render() {
   </tr>`).join('');
 
   $('#top').innerHTML = rows.slice(0, 8).map(r => `<div class="row"><b>${r.ticker}</b><span>${r.client_name} · ${r.broker_code} ${r.account}</span><strong>${fmtCcy(r.market_value_ars)}</strong></div>`).join('');
+
+  renderCauciones();
+}
+
+function caucionRow(c) {
+  const estado = c.status === 'VIGENTE' ? '<span class="pct-pill pos">Vigente</span>' : '<span class="pct-pill neg">Vencida</span>';
+  const capital = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(parseFloat(c.capital) || 0);
+  return `<tr>
+    <td>${c.client_name}</td>
+    <td>${c.broker_code}</td>
+    <td>${c.account}</td>
+    <td>${c.side === 'TOMADORA' ? 'Tomadora' : 'Colocadora'}</td>
+    <td>${c.start_date || '—'}</td>
+    <td>${c.maturity_date || '—'}</td>
+    <td class="num">${capital}</td>
+    <td>${estado}</td>
+  </tr>`;
+}
+
+function renderCauciones() {
+  const rows = filteredCauciones().slice().sort((a, b) => (a.maturity_date || '9999').localeCompare(b.maturity_date || '9999'));
+  const ars = rows.filter(c => c.currency === 'ARS');
+  const usd = rows.filter(c => c.currency === 'USD');
+  $('#caucionesArsBody').innerHTML = ars.length ? ars.map(caucionRow).join('') : '<tr><td colspan="8" class="na">Sin cauciones en pesos</td></tr>';
+  $('#caucionesUsdBody').innerHTML = usd.length ? usd.map(caucionRow).join('') : '<tr><td colspan="8" class="na">Sin cauciones en dólares</td></tr>';
 }
 
 async function load(fresh = false) {
-  const data = await sheetValues('CURRENT', { fresh });
-  allRows = rowsFromValues(data.values);
+  const [holdings, cauciones] = await Promise.all([
+    sheetValues(TENENCIAS_SHEET_ID, 'CURRENT', { fresh }),
+    sheetValues(CAUCIONES_SHEET_ID, 'CURRENT', { fresh }),
+  ]);
+  allRows = rowsFromValues(holdings.values);
+  allCauciones = rowsFromValues(cauciones.values);
   refreshFilterLabels(); render();
 }
 
