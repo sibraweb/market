@@ -151,36 +151,34 @@
     </section>
 
     <section id="tab-cauciones" class="tab">
-      <div class="box">
-        <h2>Cauciones en pesos</h2>
-        <div class="table">
-          <table>
-            <thead>
-              <tr>
-                <th>Cliente</th><th>ALyC</th><th>Comitente</th><th>Lado</th>
-                <th>Inicio</th><th>Vencimiento</th>
-                <th class="num">Capital</th><th>Estado</th>
-              </tr>
-            </thead>
-            <tbody id="caucionesArsBody"></tbody>
-          </table>
-        </div>
+      <div class="cards">
+        <article><span>Caución vigente $</span><strong id="caucionVigenteArs">—</strong></article>
+        <article><span>Próximo vencimiento $</span><strong id="caucionVencArs">—</strong></article>
+        <article>
+          <span>Caución vigente U$S
+            <span class="info-dot" title="Estimada a partir de la actividad (comprobante TCTU) — todavía no hay cuenta corriente en dólares conectada, es un valor provisorio">?</span>
+          </span>
+          <strong id="caucionVigenteUsd">—</strong>
+        </article>
+        <article><span>Próximo vencimiento U$S</span><strong id="caucionVencUsd">—</strong></article>
       </div>
       <div class="box">
         <h2>
-          Cauciones en dólares
-          <span class="info-dot" title="Estimadas a partir de la actividad (comprobante TCTU) — todavía no hay cuenta corriente en dólares conectada, es un valor provisorio">?</span>
+          Histórico de tasas (cauciones en pesos ya liquidadas)
+          <span class="info-dot" title="Solo cauciones en pesos VENCIDAS tienen capital, interés y plazo real conocidos — el histórico en dólares todavía no está disponible">?</span>
         </h2>
         <div class="table">
           <table>
             <thead>
               <tr>
-                <th>Cliente</th><th>ALyC</th><th>Comitente</th><th>Lado</th>
-                <th>Inicio</th><th>Vencimiento</th>
-                <th class="num">Capital</th><th>Estado</th>
+                <th>Lado</th>
+                <th class="num">Cauciones</th>
+                <th class="num">Promedio tomado</th>
+                <th class="num">Tasa directa prom.</th>
+                <th class="num">TNA prom.</th>
               </tr>
             </thead>
-            <tbody id="caucionesUsdBody"></tbody>
+            <tbody id="caucionStatsBody"></tbody>
           </table>
         </div>
       </div>

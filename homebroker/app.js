@@ -286,27 +286,65 @@ function render() {
   renderCauciones();
 }
 
-function caucionRow(c) {
-  const estado = c.status === 'VIGENTE' ? '<span class="pct-pill pos">Vigente</span>' : '<span class="pct-pill neg">Vencida</span>';
-  const capital = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(parseFloat(c.capital) || 0);
+function daysBetween(a, b) {
+  if (!a || !b) return null;
+  const days = Math.round((new Date(b) - new Date(a)) / 86400000);
+  return days > 0 ? days : null;
+}
+
+const fmtArs0 = n => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n || 0);
+const fmtUsd0 = n => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+
+// Totales vigentes por moneda (ambos lados) + su vencimiento más próximo —
+// no el histórico completo, solo lo que hay hoy y cuándo se libera.
+function caucionVigenteTotals(rows, currency) {
+  const vigentes = rows.filter(c => c.status === 'VIGENTE' && c.currency === currency);
+  const total = vigentes.reduce((s, c) => s + (parseFloat(c.capital) || 0), 0);
+  const nextMaturity = vigentes.map(c => c.maturity_date).filter(Boolean).sort()[0] || null;
+  return { total, nextMaturity };
+}
+
+// Promedio de capital tomado, tasa directa y TNA sobre cauciones ARS ya
+// VENCIDAS (son las únicas con capital, interés y plazo real conocidos —
+// las TCCD/TOCT/CCCD/CCTE de la cuenta corriente) para un lado dado.
+function caucionRateStats(rows, side) {
+  const vencidas = rows.filter(c => c.status === 'VENCIDA' && c.currency === 'ARS' && c.side === side);
+  if (!vencidas.length) return null;
+  const rates = vencidas.map(c => {
+    const capital = parseFloat(c.capital) || 0;
+    const interest = parseFloat(c.interest) || 0;
+    const days = daysBetween(c.start_date, c.maturity_date) || 1;
+    const directa = capital ? interest / capital * 100 : 0;
+    return { capital, directa, tna: directa * 365 / days };
+  });
+  const avg = key => rates.reduce((s, r) => s + r[key], 0) / rates.length;
+  return { count: rates.length, avgCapital: avg('capital'), avgDirecta: avg('directa'), avgTna: avg('tna') };
+}
+
+function caucionStatRow(label, s) {
   return `<tr>
-    <td>${c.client_name}</td>
-    <td>${c.broker_code}</td>
-    <td>${c.account}</td>
-    <td>${c.side === 'TOMADORA' ? 'Tomadora' : 'Colocadora'}</td>
-    <td>${c.start_date || '—'}</td>
-    <td>${c.maturity_date || '—'}</td>
-    <td class="num">${capital}</td>
-    <td>${estado}</td>
+    <td>${label}</td>
+    <td class="num">${s.count}</td>
+    <td class="num">${fmtArs0(s.avgCapital)}</td>
+    <td class="num">${numFmt(s.avgDirecta)}%</td>
+    <td class="num">${numFmt(s.avgTna)}%</td>
   </tr>`;
 }
 
 function renderCauciones() {
-  const rows = filteredCauciones().slice().sort((a, b) => (a.maturity_date || '9999').localeCompare(b.maturity_date || '9999'));
-  const ars = rows.filter(c => c.currency === 'ARS');
-  const usd = rows.filter(c => c.currency === 'USD');
-  $('#caucionesArsBody').innerHTML = ars.length ? ars.map(caucionRow).join('') : '<tr><td colspan="8" class="na">Sin cauciones en pesos</td></tr>';
-  $('#caucionesUsdBody').innerHTML = usd.length ? usd.map(caucionRow).join('') : '<tr><td colspan="8" class="na">Sin cauciones en dólares</td></tr>';
+  const rows = filteredCauciones();
+  const ars = caucionVigenteTotals(rows, 'ARS');
+  const usd = caucionVigenteTotals(rows, 'USD');
+  $('#caucionVigenteArs').textContent = fmtArs0(ars.total);
+  $('#caucionVencArs').textContent = ars.nextMaturity || '—';
+  $('#caucionVigenteUsd').textContent = fmtUsd0(usd.total);
+  $('#caucionVencUsd').textContent = usd.nextMaturity || '—';
+
+  const stats = [
+    caucionRateStats(rows, 'TOMADORA') && caucionStatRow('Tomadora', caucionRateStats(rows, 'TOMADORA')),
+    caucionRateStats(rows, 'COLOCADORA') && caucionStatRow('Colocadora', caucionRateStats(rows, 'COLOCADORA')),
+  ].filter(Boolean);
+  $('#caucionStatsBody').innerHTML = stats.length ? stats.join('') : '<tr><td colspan="5" class="na">Sin cauciones en pesos vencidas todavía</td></tr>';
 }
 
 async function load(fresh = false) {
