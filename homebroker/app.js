@@ -64,6 +64,10 @@ async function fetchMep() {
   } catch (e) { console.warn('[MEP] no se pudo calcular:', e.message); S.mep = null; }
   $('#mepBadge').textContent = S.mep ? `MEP $${numFmt(S.mep)}` : 'MEP no disponible';
   $('#mepBadge').classList.remove('hidden');
+  // load() y fetchMep() corren en paralelo (Promise.all) — el que termine
+  // último debe volver a pintar, si no la pesificación de cauciones USD
+  // (bruta, % bruto) queda calculada con mep=null cuando load() gana la carrera.
+  if (allRows.length) render();
 }
 
 function fmtCcy(arsValue, unitPrice = false) {
@@ -115,7 +119,14 @@ function buildMultiSelects() {
     const search = root.querySelector('.msel-search');
     const optsEl = root.querySelector('.msel-options');
 
-    function optionValues() { return [...new Set(allRows.map(r => r[def.field]).filter(Boolean))].sort() }
+    // Opciones acotadas por los filtros ANTERIORES en la jerarquía (Cliente →
+    // ALyC → Comitente → Título) — si elegís un cliente, ALyC/Comitente/Título
+    // solo muestran lo que ese cliente realmente tiene.
+    const idx = FILTER_DEFS.indexOf(def);
+    function optionValues() {
+      const rows = allRows.filter(r => FILTER_DEFS.every((d, j) => j >= idx || !filterState[d.key].size || filterState[d.key].has(r[d.field])));
+      return [...new Set(rows.map(r => r[def.field]).filter(Boolean))].sort();
+    }
 
     function renderOptions(filterText = '') {
       const q = filterText.toLowerCase();
@@ -141,7 +152,8 @@ function buildMultiSelects() {
     optsEl.onchange = e => {
       if (e.target.type !== 'checkbox') return;
       if (e.target.checked) filterState[def.key].add(e.target.value); else filterState[def.key].delete(e.target.value);
-      updateBtnLabel(); render();
+      pruneInvalidSelections(idx);
+      refreshFilterLabels(); render();
     };
     panel.onclick = e => e.stopPropagation();
 
@@ -151,6 +163,21 @@ function buildMultiSelects() {
 }
 
 function refreshFilterLabels() { FILTER_DEFS.forEach(d => d._update()) }
+
+// Jerarquía Cliente → ALyC → Comitente → Título (orden de FILTER_DEFS): cada
+// filtro solo acota a los que vienen DESPUÉS, nunca a los anteriores. Si fuera
+// simétrico (cualquiera acota a cualquiera) se puede armar un candado circular
+// — ej. tildás un comitente de OTRO cliente y después el cliente que buscás
+// desaparece de su propia lista porque ya no matchea el comitente tildado.
+function pruneInvalidSelections(changedIdx) {
+  for (let i = changedIdx + 1; i < FILTER_DEFS.length; i++) {
+    const d = FILTER_DEFS[i];
+    if (!filterState[d.key].size) continue;
+    const validRows = allRows.filter(r => FILTER_DEFS.every((o, j) => j >= i || !filterState[o.key].size || filterState[o.key].has(r[o.field])));
+    const validValues = new Set(validRows.map(r => r[d.field]));
+    [...filterState[d.key]].forEach(v => { if (!validValues.has(v)) filterState[d.key].delete(v); });
+  }
+}
 
 function filteredRows() {
   return allRows.filter(r =>
