@@ -2699,10 +2699,15 @@ async function loadData(fresh = false) {
   if ($('processLog')) $('processLog').innerHTML = '';
   log('☁ Cargando cartera desde la base sibra-brokers...', 'log-ok');
   try {
-    // 1) Maestro de clasificación (PAPELES) — sigue en Drive, la base no clasifica.
+    // 1) Maestros de Drive (la base no los provee): PAPELES (clasificación) y
+    //    tabla de clientes (perfil, para el rebalanceo contra las carteras tipo).
     if (fresh || !S.allocation || !Object.keys(S.allocation).length) {
       await cargarFuenteDesdeCarpeta('allocation', '1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI');
     }
+    if (fresh || !S.clientes || !S.clientes.length) {
+      await cargarFuenteDesdeCarpeta('clientes', '1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2');
+    }
+    if (!Array.isArray(S.clientes)) S.clientes = [];
     // 2) Precios data912 (para rebalanceo/target) + MEP.
     if (fresh || !Object.keys(S.priceIndex).length) await fetchPrices();
     if (fresh || !S.mep) await fetchMEP();
@@ -2712,16 +2717,25 @@ async function loadData(fresh = false) {
       alyc: t.alyc, comitente: t.comitente, cliente: t.cliente, ticker: t.ticker,
       tenencia: t.cantidad, valorBase: t.valor, precioUnit: t.precio, tipoBase: t.tipo,
     }));
-    // 4) Cauciones desde la base -> S.clientes por comitente (para neta/bruta).
+    // 4) Cauciones desde la base: se OVERLAYAN sobre el maestro de clientes (el
+    //    perfil viene de Drive; las cauciones, de la base — ya no del Excel).
     const { caucionByAccount } = await SibraBrokers.loadCauciones({ fresh });
     const cauc = caucionByAccount();
-    const byCC = {};
-    ten.forEach(t => {
-      if (byCC[t.comitente]) return;
-      const c = cauc[t.alyc + '|' + t.comitente] || { ars: 0, usd: 0 };
-      byCC[t.comitente] = { cc: t.comitente, cliente: t.cliente, caucionPesos: c.ars, caucionDolares: c.usd };
+    const caucByCC = {};
+    for (const key in cauc) caucByCC[normCC(key.split('|')[1])] = cauc[key];
+    S.clientes.forEach(c => {
+      const f = caucByCC[normCC(c.cc)] || { ars: 0, usd: 0 };
+      c.caucionPesos = f.ars; c.caucionDolares = f.usd;
     });
-    S.clientes = Object.values(byCC);
+    // Comitentes que están en tenencias pero no en el maestro -> se agregan.
+    const known = new Set(S.clientes.map(c => normCC(c.cc)));
+    ten.forEach(t => {
+      const cc = normCC(t.comitente);
+      if (known.has(cc)) return;
+      known.add(cc);
+      const f = caucByCC[cc] || { ars: 0, usd: 0 };
+      S.clientes.push({ cc: t.comitente, cliente: t.cliente, perfil: 'AGRESIVO', caucionPesos: f.ars, caucionDolares: f.usd });
+    });
     SibraCache.set('actual_posiciones', S.posiciones);
     if ($('kpiPos')) $('kpiPos').textContent = S.posiciones.length;
     if ($('kpiClientes')) $('kpiClientes').textContent = S.clientes.length;
