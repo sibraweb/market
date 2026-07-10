@@ -202,12 +202,32 @@ function pctPill(pct) {
   return `<span class="pct-pill ${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${numFmt(v)}%</span>`;
 }
 
-// Etiquetas del grupo de activo tal como vienen de BCCH -> nombre usual
+// Unifica el "Tipo" a una taxonomía común (misma para BCCH e IEB que para
+// ADCAP): tipo base + moneda ($ / U$D). ADCAP manda grupos tipo
+// "Cedears / Pesos" o "Títulos Públicos / Dolar MEP (Local)"; los normalizamos
+// para que la columna quede consistente con data912 (CEDEARs, Acciones, Bonos,
+// ON, ETFs, FCI) en vez de mezclar formatos por broker.
 const ASSET_GROUP_LABELS = {
   'Titulos Publicos': 'Bonos $',
   'Titulos Publicos U$S': 'Bonos U$D',
 };
-function assetGroupLabel(g) { return ASSET_GROUP_LABELS[g] || g }
+const ADCAP_TYPE_MAP = {
+  'Cedears': 'CEDEARs', 'Acciones': 'Acciones', 'ETFs': 'ETFs', 'Fondos': 'FCI',
+  'Títulos Públicos': 'Bonos', 'Titulos Publicos': 'Bonos',
+  'Obligaciones Negociables': 'ON', 'Cuenta Corriente': 'Cuenta Corriente',
+  'Posición Informativa': 'Info', 'Posicion Informativa': 'Info',
+};
+function assetGroupLabel(group, currency) {
+  if (ASSET_GROUP_LABELS[group]) return ASSET_GROUP_LABELS[group];
+  if (!group) return '—';
+  const parts = group.split('/').map(s => s.trim());
+  const rawType = parts[0], moneda = parts.slice(1).join(' ');
+  const type = ADCAP_TYPE_MAP[rawType] || rawType;
+  const usd = String(currency || '').toUpperCase() === 'USD' || /d[oó]lar|u\$s|usd|cable|mep/i.test(moneda);
+  if (type === 'Info') return 'Info';
+  if (type === 'Cuenta Corriente') return 'Cuenta Corriente ' + (usd ? 'U$D' : '$');
+  return type + (usd ? ' U$D' : ' $');
+}
 
 // Cauciones TOMADORA vigentes de las cuentas filtradas — mismo criterio que
 // market/actual: bruta = neta + caución tomadora pesificada al MEP (la
@@ -269,7 +289,7 @@ function render() {
     <td>${r.broker_code}</td>
     <td>${r.account}</td>
     <td><b>${r.ticker}</b></td>
-    <td>${assetGroupLabel(r.asset_group)}</td>
+    <td>${assetGroupLabel(r.asset_group, r.currency)}</td>
     <td class="num">${numFmt(r.quantity)}</td>
     <td class="num">${fmtCcy(r.average_cost, true)}</td>
     <td class="num">${fmtCcy(r.last_price, true)}</td>

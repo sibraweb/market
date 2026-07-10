@@ -94,10 +94,13 @@ header small{color:var(--accent);font-size:var(--fs-micro,.6rem);letter-spacing:
 
 /* ── Table ─────────────────────────────────────────────────── */
 .table{overflow:auto}
-table{border-collapse:collapse;width:100%;font-size:var(--fs-sm,.85rem);white-space:nowrap}
-th,td{padding:.7rem .6rem;border-bottom:1px solid var(--line);text-align:left}
-th{color:var(--muted);font-weight:var(--fw-semibold,600);font-size:var(--fs-micro,.65rem);text-transform:uppercase;letter-spacing:.5px}
+table{border-collapse:collapse;width:100%;font-size:var(--fs-sm,.82rem);white-space:nowrap}
+th,td{padding:.55rem .5rem;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:var(--fw-semibold,600);font-size:var(--fs-micro,.62rem);text-transform:uppercase;letter-spacing:.4px}
 th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+/* La columna Cliente es la más larga (razones sociales) — la acotamos con
+   elipsis para que el resto de las columnas entren sin scroll horizontal. */
+#holdingsBody td:first-child{max-width:170px;overflow:hidden;text-overflow:ellipsis}
 tbody tr:hover{background:rgba(255,255,255,.03)}
 .info-dot{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;
   border:1px solid var(--muted);color:var(--muted);font-size:.6rem;margin-left:.3rem;cursor:help}
