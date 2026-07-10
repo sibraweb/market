@@ -33,6 +33,7 @@
     <button data-tab="resumen" class="active">Resumen</button>
     <button data-tab="tenencias">Tenencias</button>
     <button data-tab="cauciones">Cauciones</button>
+    <button data-tab="ctacte">Cuenta Corriente</button>
     <button id="logout">Salir</button>
   </aside>
   <main>
@@ -163,6 +164,24 @@
         <article><span>Próximo vencimiento U$S</span><strong id="caucionVencUsd">—</strong></article>
       </div>
       <div class="box">
+        <div class="box-head">
+          <h2>Cuentas a decidir (cauciones vigentes)</h2>
+          <button class="ghost" onclick="exportSheet('cauciones')">↓ Exportar a Sheet</button>
+        </div>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th><th>ALyC</th><th>Comitente</th>
+                <th class="num">Caución $</th><th class="num">Caución U$S</th>
+                <th>Próx. vencimiento</th>
+              </tr>
+            </thead>
+            <tbody id="caucionDecidirBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="box">
         <h2>
           Histórico de tasas (cauciones en pesos ya liquidadas)
           <span class="info-dot" title="Solo cauciones en pesos VENCIDAS tienen capital, interés y plazo real conocidos — el histórico en dólares todavía no está disponible">?</span>
@@ -179,6 +198,26 @@
               </tr>
             </thead>
             <tbody id="caucionStatsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-ctacte" class="tab">
+      <div class="box">
+        <div class="box-head">
+          <h2>Cuenta Corriente — saldos por cuenta</h2>
+          <button class="ghost" onclick="exportSheet('ctacte')">↓ Exportar a Sheet</button>
+        </div>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th><th>ALyC</th><th>Comitente</th>
+                <th class="num">Saldo $</th><th class="num">Saldo U$S</th>
+              </tr>
+            </thead>
+            <tbody id="ctacteBody"></tbody>
           </table>
         </div>
       </div>

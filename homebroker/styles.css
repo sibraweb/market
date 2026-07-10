@@ -91,6 +91,8 @@ header small{color:var(--accent);font-size:var(--fs-micro,.6rem);letter-spacing:
 .cards strong{display:block;font-size:1.7rem;margin-top:var(--space-2,.5rem);font-weight:var(--fw-bold,700)}
 .box{margin-bottom:var(--space-4,1rem)}
 .box h2{font-size:var(--fs-h4,1rem);margin:0 0 var(--space-4,1rem)}
+.box-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:var(--space-4,1rem)}
+.box-head h2{margin:0}
 
 /* ── Table ─────────────────────────────────────────────────── */
 .table{overflow:auto}

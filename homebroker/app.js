@@ -304,6 +304,7 @@ function render() {
   $('#top').innerHTML = rows.slice(0, 8).map(r => `<div class="row"><b>${r.ticker}</b><span>${r.client_name} · ${r.broker_code} ${r.account}</span><strong>${fmtCcy(r.market_value_ars)}</strong></div>`).join('');
 
   renderCauciones();
+  renderCuentaCorriente();
 }
 
 function daysBetween(a, b) {
@@ -365,6 +366,89 @@ function renderCauciones() {
     caucionRateStats(rows, 'COLOCADORA') && caucionStatRow('Colocadora', caucionRateStats(rows, 'COLOCADORA')),
   ].filter(Boolean);
   $('#caucionStatsBody').innerHTML = stats.length ? stats.join('') : '<tr><td colspan="5" class="na">Sin cauciones en pesos vencidas todavía</td></tr>';
+  renderCuentasDecidir();
+}
+
+// ── Cuentas a decidir: cauciones VIGENTES por cuenta ($ y U$S), para que la
+//    mesa decida cerrar o renovar. Respeta los filtros ALyC/comitente. ──
+function accountCaucionesVigentes(rows) {
+  const m = {};
+  rows.filter(c => c.status === 'VIGENTE').forEach(c => {
+    const key = c.broker_code + '|' + c.account;
+    if (!m[key]) m[key] = { cliente: c.client_name, alyc: c.broker_code, comitente: c.account, ars: 0, usd: 0, venc: null };
+    const cap = parseFloat(c.capital) || 0;
+    if (String(c.currency).toUpperCase() === 'USD') m[key].usd += cap; else m[key].ars += cap;
+    if (c.maturity_date && (!m[key].venc || c.maturity_date < m[key].venc)) m[key].venc = c.maturity_date;
+  });
+  return Object.values(m).sort((a, b) => (b.ars + b.usd) - (a.ars + a.usd));
+}
+function renderCuentasDecidir() {
+  const accts = accountCaucionesVigentes(filteredCauciones());
+  $('#caucionDecidirBody').innerHTML = accts.length ? accts.map(a => `<tr>
+    <td>${a.cliente}</td><td>${a.alyc}</td><td>${a.comitente}</td>
+    <td class="num">${a.ars ? fmtArs0(a.ars) : '—'}</td>
+    <td class="num">${a.usd ? fmtUsd0(a.usd) : '—'}</td>
+    <td>${a.venc || '—'}</td>
+  </tr>`).join('') : '<tr><td colspan="6" class="na">Sin cauciones vigentes</td></tr>';
+}
+
+// ── Cuenta Corriente: saldos de efectivo por cuenta ($ ARS y U$S nominal),
+//    incluye positivos y negativos. Respeta los filtros. ──
+function accountCash(rows) {
+  const m = {};
+  rows.filter(r => String(r.asset_group).toLowerCase().includes('cuenta corriente')).forEach(r => {
+    const key = r.broker_code + '|' + r.account;
+    if (!m[key]) m[key] = { cliente: r.client_name, alyc: r.broker_code, comitente: r.account, ars: 0, usd: 0 };
+    if (String(r.currency).toUpperCase() === 'USD') m[key].usd += parseFloat(r.quantity) || 0;
+    else m[key].ars += parseFloat(r.market_value_ars) || 0;
+  });
+  return Object.values(m).filter(a => a.ars || a.usd).sort((a, b) => Math.abs(b.ars) - Math.abs(a.ars));
+}
+function renderCuentaCorriente() {
+  const accts = accountCash(filteredRows());
+  $('#ctacteBody').innerHTML = accts.length ? accts.map(a => `<tr>
+    <td>${a.cliente}</td><td>${a.alyc}</td><td>${a.comitente}</td>
+    <td class="num">${fmtArs0(a.ars)}</td>
+    <td class="num">${a.usd ? fmtUsd0(a.usd) : '—'}</td>
+  </tr>`).join('') : '<tr><td colspan="5" class="na">Sin saldos de cuenta corriente</td></tr>';
+}
+
+// ── Export a Google Sheet (nuevo spreadsheet) del listado filtrado, para
+//    mandarle a la mesa de cada ALyC. Usa el token de SibraAuth (scope
+//    spreadsheets + drive.file). ──
+async function exportSheet(kind) {
+  const token = SibraAuth.getToken();
+  if (!token) { toast('Conectate con Google primero.'); return; }
+  let title, headers, rows;
+  if (kind === 'cauciones') {
+    const accts = accountCaucionesVigentes(filteredCauciones());
+    title = 'SIBRA Cauciones a decidir ' + new Date().toISOString().slice(0, 10);
+    headers = ['Cliente', 'ALyC', 'Comitente', 'Caución $', 'Caución U$S', 'Próx. vencimiento'];
+    rows = accts.map(a => [a.cliente, a.alyc, a.comitente, a.ars, a.usd, a.venc || '']);
+  } else {
+    const accts = accountCash(filteredRows());
+    title = 'SIBRA Cuenta Corriente ' + new Date().toISOString().slice(0, 10);
+    headers = ['Cliente', 'ALyC', 'Comitente', 'Saldo $', 'Saldo U$S'];
+    rows = accts.map(a => [a.cliente, a.alyc, a.comitente, a.ars, a.usd]);
+  }
+  if (!rows.length) { toast('No hay filas para exportar.'); return; }
+  try {
+    toast('Creando Sheet…');
+    const create = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties: { title } }),
+    });
+    if (!create.ok) throw new Error('crear ' + create.status);
+    const created = await create.json();
+    const sheetTitle = created.sheets[0].properties.title;
+    const w = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${created.spreadsheetId}/values/${encodeURIComponent(sheetTitle)}!A1:append?valueInputOption=RAW`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [headers, ...rows] }),
+    });
+    if (!w.ok) throw new Error('escribir ' + w.status);
+    window.open('https://docs.google.com/spreadsheets/d/' + created.spreadsheetId, '_blank');
+    toast('Sheet creado — se abrió en otra pestaña.');
+  } catch (e) { toast('Error al exportar: ' + e.message); }
 }
 
 async function load(fresh = false) {
