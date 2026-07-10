@@ -929,78 +929,26 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
 
       <div class="section-head">
         <h3>Fuentes de datos</h3>
-        <button class="btn-primary" id="btnCargarDrive" onclick="App.cargarTodoDesdeDrive()">
-          ☁ Cargar todo desde Drive
+        <button class="btn-primary" id="btnCargarDrive" onclick="App.loadData(true)">
+          ↻ Actualizar desde la base
         </button>
       </div>
 
-      <!-- Carpetas configuradas -->
+      <!-- Tenencias + cauciones vienen de la base sibra-brokers (ya no de Excel). -->
       <div style="background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:12px;">
-        <div class="block-title" style="margin-bottom:12px;">Carpetas Drive configuradas</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-
-          <div class="source-card" id="sc-adcap">
-            <div class="sc-title">ADCAP</div>
-            <div class="sc-file" id="sc-adcap-name">Carpeta configurada</div>
-            <div class="sc-status idle" id="sc-adcap-status"><span>●</span> Sin cargar</div>
-            <div style="display:flex; gap:6px; margin-top:10px;">
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarAlycDesdeCarpeta('ADCAP','1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2')">↓ Drive</button>
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickAlycFile('ADCAP')">↑ Local</button>
-            </div>
-          </div>
-
-          <div class="source-card" id="sc-ieb">
-            <div class="sc-title">IEB</div>
-            <div class="sc-file" id="sc-ieb-name">Carpeta configurada</div>
-            <div class="sc-status idle" id="sc-ieb-status"><span>●</span> Sin cargar</div>
-            <div style="display:flex; gap:6px; margin-top:10px;">
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarAlycDesdeCarpeta('IEB','16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ')">↓ Drive</button>
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickAlycFile('IEB')">↑ Local</button>
-            </div>
-          </div>
-
-          <div class="source-card" id="sc-bcch">
-            <div class="sc-title">BCCH</div>
-            <div class="sc-file" id="sc-bcch-name">Carpeta configurada · 1 archivo/comitente</div>
-            <div class="sc-status idle" id="sc-bcch-status"><span>●</span> Sin cargar</div>
-            <div style="display:flex; gap:6px; margin-top:10px;">
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarBCCHDesdeCarpeta()">↓ Drive</button>
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickAlycFile('BCCH')">↑ Local</button>
-            </div>
-          </div>
-
-          <div class="source-card" id="sc-clientes">
-            <div class="sc-title">Clientes</div>
-            <div class="sc-file" id="sc-clientes-name">Carpeta configurada</div>
-            <div class="sc-status idle" id="sc-clientes-status"><span>●</span> Sin cargar</div>
-            <div style="display:flex; gap:6px; margin-top:10px;">
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarFuenteDesdeCarpeta('clientes','1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2')">↓ Drive</button>
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickLocalFile('clientes')">↑ Local</button>
-            </div>
-          </div>
-
-          <div class="source-card" id="sc-allocation">
-            <div class="sc-title">Allocation (PAPELES)</div>
-            <div class="sc-file" id="sc-allocation-name">Carpeta configurada</div>
-            <div class="sc-status idle" id="sc-allocation-status"><span>●</span> Sin cargar</div>
-            <div style="display:flex; gap:6px; margin-top:10px;">
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarFuenteDesdeCarpeta('allocation','1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI')">↓ Drive</button>
-              <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickLocalFile('allocation')">↑ Local</button>
-            </div>
-          </div>
-
+        <div class="block-title" style="margin-bottom:8px;">Base sibra-brokers</div>
+        <div style="font-size:12px; color:var(--text3); margin-bottom:14px;">
+          Tenencias, efectivo y cauciones de BCCH / IEB / ADCAP se sincronizan solos y se leen de la base. No hace falta cargar Excel.
         </div>
 
-        <!-- ALyCs adicionales -->
-        <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
-          <div class="text-sm mb-12">ALyCs adicionales (local)</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn-secondary" style="font-size:11px; padding:5px 12px;" onclick="App.pickAlycFile('BALANCE')">+ BALANCE</button>
-            <button class="btn-secondary" style="font-size:11px; padding:5px 12px;" onclick="App.pickAlycFile('BCCH')">+ BCCH</button>
-            <button class="btn-secondary" style="font-size:11px; padding:5px 12px;" onclick="App.pickAlycFile('OTRO')">+ Otra ALyC</button>
+        <div class="source-card" id="sc-allocation">
+          <div class="sc-title">Allocation (PAPELES) · maestro de clasificación</div>
+          <div class="sc-file" id="sc-allocation-name">Carpeta configurada</div>
+          <div class="sc-status idle" id="sc-allocation-status"><span>●</span> Sin cargar</div>
+          <div style="display:flex; gap:6px; margin-top:10px;">
+            <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarFuenteDesdeCarpeta('allocation','1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI')">↓ Drive</button>
+            <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickLocalFile('allocation')">↑ Local</button>
           </div>
-          <div id="alycTags" class="alyc-tags mt-12"></div>
-          <div id="alycCount" style="font-size:11px; color:var(--text3); margin-top:6px;"></div>
         </div>
       </div>
 
@@ -1015,9 +963,9 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
         </div>
       </div>
 
-      <!-- Botón procesar -->
-      <button class="btn-primary w-full" style="padding:11px; font-size:13px; justify-content:center;" onclick="App.procesarArchivos()">
-        ⚡ Procesar y cruzar datos
+      <!-- Cargar/actualizar la cartera desde la base -->
+      <button class="btn-primary w-full" style="padding:11px; font-size:13px; justify-content:center;" onclick="App.loadData(true)">
+        ↻ Cargar cartera desde la base
       </button>
 
       <!-- Log -->
