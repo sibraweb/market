@@ -13,6 +13,29 @@ const SibraBrokers = (() => {
 
   function num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; }
 
+  // Unificación de efectivo/monedas entre ALyCs: cada broker nombra distinto el
+  // efectivo (BCCH: CASH_ARS/CASH_USD; ADCAP: $/USD D/USD C/USD 7000; IEB:
+  // DOLARUSA/DOLAR EXT.). Los llevamos a 4 buckets canónicos para que sumen:
+  //   ARS        = pesos
+  //   USD_MEP    = dólar MEP (local)
+  //   USD_DIVISA = dólar divisa "7000" (convertible a MEP)
+  //   USD_CABLE  = dólar cable / exterior (hay que comprar afuera)
+  // [ticker canónico, etiqueta de tipo, bucket]
+  const CASH_MAP = {
+    '$':          ['PESOS', 'Pesos', 'ARS'],
+    'CASH_ARS':   ['PESOS', 'Pesos', 'ARS'],
+    'PESOS':      ['PESOS', 'Pesos', 'ARS'],
+    'USD D':      ['USD_MEP', 'Dólar MEP', 'USD_MEP'],
+    'CASH_USD':   ['USD_MEP', 'Dólar MEP', 'USD_MEP'],
+    'USD 7000':   ['USD_DIVISA', 'Dólar divisa', 'USD_DIVISA'],
+    'DOLARUSA':   ['USD_DIVISA', 'Dólar divisa', 'USD_DIVISA'],
+    'USD C':      ['USD_CABLE', 'Dólar cable', 'USD_CABLE'],
+    'DOLAR EXT.': ['USD_CABLE', 'Dólar cable', 'USD_CABLE'],
+  };
+  function normalizeCash(ticker) {
+    return CASH_MAP[String(ticker || '').trim()] || null;
+  }
+
   async function sheetValues(sheetId, range, { fresh = false } = {}) {
     const token = SibraAuth.getToken();
     if (!token) throw new Error('No hay sesión de Google. Conectate primero.');
@@ -40,19 +63,26 @@ const SibraBrokers = (() => {
   // Posiciones normalizadas desde TENENCIAS.CURRENT (BCCH/IEB/ADCAP, efectivo incluido).
   async function loadTenencias(opts = {}) {
     const data = await sheetValues(TENENCIAS_SHEET_ID, 'CURRENT', opts);
-    return rowsFromValues(data.values).map(r => ({
-      alyc: r.broker_code,
-      comitente: r.account,
-      cliente: r.client_name,
-      ticker: r.ticker,
-      tipo: r.asset_group,
-      moneda: r.currency,
-      cantidad: num(r.quantity),
-      ppc: num(r.average_cost),
-      precio: num(r.last_price),
-      valor: num(r.market_value_ars),
-      rentabilidadPct: r.unrealized_pnl_pct === '' ? null : num(r.unrealized_pnl_pct),
-    }));
+    return rowsFromValues(data.values).map(r => {
+      const cash = normalizeCash(r.ticker);
+      return {
+        alyc: r.broker_code,
+        comitente: r.account,
+        cliente: r.client_name,
+        // Efectivo: ticker/tipo canónicos para que sume entre ALyCs. Título normal: como viene.
+        ticker: cash ? cash[0] : r.ticker,
+        tipo: cash ? cash[1] : r.asset_group,
+        moneda: r.currency,
+        // Bucket de moneda unificado (ARS / USD_MEP / USD_DIVISA / USD_CABLE).
+        bucket: cash ? cash[2] : (String(r.currency).toUpperCase() === 'USD' ? 'USD' : 'ARS'),
+        esEfectivo: !!cash,
+        cantidad: num(r.quantity),
+        ppc: num(r.average_cost),
+        precio: num(r.last_price),
+        valor: num(r.market_value_ars),
+        rentabilidadPct: r.unrealized_pnl_pct === '' ? null : num(r.unrealized_pnl_pct),
+      };
+    });
   }
 
   // Cauciones crudas + helper de caución tomadora vigente por cuenta.
