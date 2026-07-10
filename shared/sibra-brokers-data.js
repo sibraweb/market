@@ -27,8 +27,8 @@ const SibraBrokers = (() => {
     'PESOS':      ['PESOS', 'Pesos', 'ARS'],
     'USD D':      ['USD_MEP', 'Dólar MEP', 'USD_MEP'],
     'CASH_USD':   ['USD_MEP', 'Dólar MEP', 'USD_MEP'],
-    'USD 7000':   ['USD_DIVISA', 'Dólar divisa', 'USD_DIVISA'],
-    'DOLARUSA':   ['USD_DIVISA', 'Dólar divisa', 'USD_DIVISA'],
+    'DOLARUSA':   ['USD_MEP', 'Dólar MEP', 'USD_MEP'],
+    'USD 7000':   ['USD_DIVISA', 'Dólar 7000', 'USD_DIVISA'],
     'USD C':      ['USD_CABLE', 'Dólar cable', 'USD_CABLE'],
     'DOLAR EXT.': ['USD_CABLE', 'Dólar cable', 'USD_CABLE'],
   };
