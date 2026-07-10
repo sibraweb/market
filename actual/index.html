@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
+<script src="../shared/sibra-brokers-data.js"></script>
 <style>
 :root {
   --red: #E10600;
@@ -1826,7 +1827,8 @@ function limpiarFiltroGlobal() {
 function driveAuth() {
   SibraAuth.connect().then(t => {
     S.token = t; S.tokenExpiry = new Date(localStorage.getItem('sibra_token_exp'));
-    updateDriveUI(true); log('✅ Conectado a Google Drive', 'log-ok');
+    updateDriveUI(true); log('✅ Conectado a Google', 'log-ok');
+    loadData(true);  // apenas conecta, carga la cartera desde la base
   }).catch(e => log('❌ Auth error: ' + e.message, 'log-err'));
 }
 
@@ -2738,48 +2740,57 @@ function parseBCCHOnlineDOM(tables, comitente, posiciones) {
 }
 
 
-async function procesarArchivos() {
-  $('processLog').innerHTML = '';
-  log('🔄 Iniciando procesamiento...');
-
-  if (S.alycFiles.length === 0) {
-    log('⚠ No hay archivos de ALyC cargados', 'log-warn');
-  }
-
-  S.posiciones = [];
-  for (const f of S.alycFiles) {
-    try {
-      let pos = [];
-      if (f.alyc === 'ADCAP')       pos = parseADCAP(f.data);
-      else if (f.alyc === 'IEB')    pos = parseIEB(f.data);
-      else if (f.alyc === 'BCCH')   pos = parseBCCHFile(f.data, f.comitente || f.name.replace(/\.xls$/i,''));
-      else pos = parseGenericAlyc(f.data, f.alyc);
-      S.posiciones.push(...pos);
-      log(`  ✓ ${f.alyc} (${f.name}): ${pos.length} posiciones`, 'log-ok');
-    } catch(e) {
-      log(`  ❌ Error en ${f.name}: ${e.message}`, 'log-err');
+// ══════════════════════════════════════════
+//  FUENTE DE DATOS: base de sibra-brokers (TENENCIAS + CAUCIONES).
+//  Reemplaza la carga por Excel de tenencias/cauciones. La clasificación
+//  (maestro PAPELES/allocation) y el modelo siguen viniendo de Drive porque
+//  la base no clasifica país/grupo/sector ni define carteras objetivo.
+// ══════════════════════════════════════════
+async function loadData(fresh = false) {
+  if (!S.token) { alert('Conectá con Google primero.'); return; }
+  if ($('processLog')) $('processLog').innerHTML = '';
+  log('☁ Cargando cartera desde la base sibra-brokers...', 'log-ok');
+  try {
+    // 1) Maestro de clasificación (PAPELES) — sigue en Drive, la base no clasifica.
+    if (fresh || !S.allocation || !Object.keys(S.allocation).length) {
+      await cargarFuenteDesdeCarpeta('allocation', '1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI');
     }
+    // 2) Precios data912 (para rebalanceo/target) + MEP.
+    if (fresh || !Object.keys(S.priceIndex).length) await fetchPrices();
+    if (fresh || !S.mep) await fetchMEP();
+    // 3) Tenencias desde la base (BCCH/IEB/ADCAP, efectivo incluido).
+    const ten = await SibraBrokers.loadTenencias({ fresh });
+    S.posiciones = ten.map(t => ({
+      alyc: t.alyc, comitente: t.comitente, cliente: t.cliente, ticker: t.ticker,
+      tenencia: t.cantidad, valorBase: t.valor, precioUnit: t.precio, tipoBase: t.tipo,
+    }));
+    // 4) Cauciones desde la base -> S.clientes por comitente (para neta/bruta).
+    const { caucionByAccount } = await SibraBrokers.loadCauciones({ fresh });
+    const cauc = caucionByAccount();
+    const byCC = {};
+    ten.forEach(t => {
+      if (byCC[t.comitente]) return;
+      const c = cauc[t.alyc + '|' + t.comitente] || { ars: 0, usd: 0 };
+      byCC[t.comitente] = { cc: t.comitente, cliente: t.cliente, caucionPesos: c.ars, caucionDolares: c.usd };
+    });
+    S.clientes = Object.values(byCC);
+    SibraCache.set('actual_posiciones', S.posiciones);
+    if ($('kpiPos')) $('kpiPos').textContent = S.posiciones.length;
+    if ($('kpiClientes')) $('kpiClientes').textContent = S.clientes.length;
+    if ($('dataResumen')) $('dataResumen').style.display = '';
+    actualizarSelectores();
+    try { renderCartaGlobal(); } catch (e) { console.warn('[actual] renderCartaGlobal:', e); }
+    try { actualizarDashboard(); } catch (e) { console.warn('[actual] actualizarDashboard:', e); }
+    log(`✅ ${S.posiciones.length} posiciones de ${S.clientes.length} cuentas cargadas desde la base.`, 'log-ok');
+  } catch (e) {
+    log('❌ Error cargando desde la base: ' + e.message, 'log-err');
+    console.error('[actual] loadData:', e);
   }
-
-  if (Object.keys(S.priceIndex).length === 0) {
-    log('📡 Descargando precios Data912...', '');
-    await fetchPrices();
-  }
-
-  const kpiP2 = $('kpiPos');
-  if (kpiP2) kpiP2.textContent = S.posiciones.length;
-  const dr = $('dataResumen');
-  if (dr) dr.style.display = '';
-  actualizarSelectores();
-  // Debug match clientes
-  const conCliente = S.posiciones.filter(p => findCliente(p.comitente));
-  const sinCliente = [...new Set(S.posiciones.filter(p => !findCliente(p.comitente)).map(p => p.comitente))];
-  log(`👥 Comitentes con match en clientes: ${new Set(S.posiciones.filter(p=>findCliente(p.comitente)).map(p=>p.comitente)).size} / ${new Set(S.posiciones.map(p=>p.comitente)).size}`, 'log-ok');
-  if (sinCliente.length) log(`⚠ Sin match en clientes (primeros 5): ${sinCliente.slice(0,5).join(', ')}`, 'log-warn');
-
-  log(`\n✅ Listo. ${S.posiciones.length} posiciones totales.`, 'log-ok');
-  SibraCache.set('actual_posiciones', S.posiciones);
 }
+
+// Los botones "Cargar todo" / "Procesar" ahora leen de la base (no de Excel).
+async function procesarArchivos() { await loadData(false); }
+async function cargarTodoDesdeDrive() { await loadData(true); }
 
 // Al entrar al módulo, si hay un procesamiento reciente en caché (ver
 // shared/sibra-cache.js) lo restaura sin esperar a que el usuario toque
@@ -3358,13 +3369,16 @@ function valuarCartera(pos) {
   const mapa = {};
   pos.forEach(p => {
     if (!mapa[p.ticker]) mapa[p.ticker] = { ...p };
-    else mapa[p.ticker] = { ...mapa[p.ticker], tenencia: mapa[p.ticker].tenencia + p.tenencia };
+    else mapa[p.ticker] = { ...mapa[p.ticker], tenencia: mapa[p.ticker].tenencia + p.tenencia,
+                            valorBase: (mapa[p.ticker].valorBase || 0) + (p.valorBase || 0) };
   });
   return Object.values(mapa).map(p => {
     const alloc = S.allocation[p.ticker];
-    const tipo = clasificarTicker(p.ticker, alloc);
-    const precioUnit = getPrecioUnitario(p.ticker, tipo) ?? 0;
-    const valor = p.tenencia * precioUnit;
+    const tipo = clasificarTicker(p.ticker, alloc) || p.tipoBase || '';
+    // Valor autoritativo: el que ya trae la base (market_value_ars del broker).
+    // Sólo si falta cae al cálculo tenencia × precio de data912.
+    const precioUnit = (p.precioUnit != null && p.precioUnit !== 0) ? p.precioUnit : (getPrecioUnitario(p.ticker, tipo) ?? 0);
+    const valor = (p.valorBase != null) ? p.valorBase : p.tenencia * precioUnit;
     return { ...p, alloc: alloc || {}, tipo, precioUnit, valor };
   }).filter(p => p.valor !== 0);
 }
@@ -3806,7 +3820,7 @@ function init() {
   try {
     initNav();
     restoreToken();
-    if (S.token) restoreCachedPosiciones();
+    if (S.token) { restoreCachedPosiciones(); loadData(false); }
     initAC();
     const cid = localStorage.getItem('sibra_client_id');
     if (cid && $('cfgClientId')) $('cfgClientId').value = cid;
@@ -3821,7 +3835,7 @@ return {
   driveAuth, driveRevoke, driveBrowse, closeDrivePicker, confirmDrivePick,
   pickLocalFile, pickAlycFile,
   cargarFuenteDesdeCarpeta, cargarAlycDesdeCarpeta, cargarTodoDesdeDrive, cargarBCCHDesdeCarpeta,
-  removeAlyc, procesarArchivos, fetchPrices, fetchMEP,
+  removeAlyc, procesarArchivos, loadData, fetchPrices, fetchMEP,
   onAlycChange, onClienteChange, onRotAlycChange,
   filtrarCartera, limpiarFiltroGlobal, sortCartera,
   applyDashFilters, clearDashFilter, clearDashFilters,
