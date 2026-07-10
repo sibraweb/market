@@ -2707,6 +2707,9 @@ async function loadData(fresh = false) {
     if (fresh || !S.clientes || !S.clientes.length) {
       await cargarFuenteDesdeCarpeta('clientes', '1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2');
     }
+    if (fresh || !S.modelos || !Object.keys(S.modelos).length) {
+      await cargarFuenteDesdeCarpeta('modelo', '1kp9JuBqLxc2VZFEnjRxo_BNVQEHZOIYL');
+    }
     if (!Array.isArray(S.clientes)) S.clientes = [];
     // 2) Precios data912 (para rebalanceo/target) + MEP.
     if (fresh || !Object.keys(S.priceIndex).length) await fetchPrices();
