@@ -207,7 +207,14 @@
       <div class="box">
         <div class="box-head">
           <h2>Cuenta Corriente — saldos por cuenta</h2>
-          <button class="ghost" onclick="exportSheet('ctacte')">↓ Exportar a Sheet</button>
+          <div class="header-actions">
+            <div class="ccy-toggle">
+              <button class="ccy active" data-ccfilter="all" onclick="setCtacteFilter('all')">Todos</button>
+              <button class="ccy" data-ccfilter="pos" onclick="setCtacteFilter('pos')">Positivos</button>
+              <button class="ccy" data-ccfilter="neg" onclick="setCtacteFilter('neg')">Negativos</button>
+            </div>
+            <button class="ghost" onclick="exportSheet('ctacte')">↓ Exportar a Sheet</button>
+          </div>
         </div>
         <div class="table">
           <table>

@@ -411,8 +411,21 @@ function accountCash(rows) {
   });
   return Object.values(m).filter(a => a.ars || a.mep || a.div || a.cable).sort((a, b) => Math.abs(b.ars) - Math.abs(a.ars));
 }
+// Filtro por signo del saldo en pesos (descubierto vs a favor): all/pos/neg.
+let ctacteFilter = 'all';
+function setCtacteFilter(f) {
+  ctacteFilter = f;
+  document.querySelectorAll('[data-ccfilter]').forEach(b => b.classList.toggle('active', b.dataset.ccfilter === f));
+  renderCuentaCorriente();
+}
+function filteredCtacte() {
+  let accts = accountCash(filteredRows());
+  if (ctacteFilter === 'pos') accts = accts.filter(a => a.ars > 0);
+  else if (ctacteFilter === 'neg') accts = accts.filter(a => a.ars < 0);
+  return accts;
+}
 function renderCuentaCorriente() {
-  const accts = accountCash(filteredRows());
+  const accts = filteredCtacte();
   const u = v => v ? fmtUsd0(v) : '—';
   $('#ctacteBody').innerHTML = accts.length ? accts.map(a => `<tr>
     <td>${a.cliente}</td><td>${a.alyc}</td><td>${a.comitente}</td>
@@ -434,7 +447,7 @@ async function exportSheet(kind) {
     headers = ['Cliente', 'ALyC', 'Comitente', 'Caución $', 'Caución U$S', 'Próx. vencimiento'];
     rows = accts.map(a => [a.cliente, a.alyc, a.comitente, a.ars, a.usd, a.venc || '']);
   } else {
-    const accts = accountCash(filteredRows());
+    const accts = filteredCtacte();
     title = 'SIBRA Cuenta Corriente ' + new Date().toISOString().slice(0, 10);
     headers = ['Cliente', 'ALyC', 'Comitente', 'Saldo $', 'USD MEP', 'USD 7000', 'USD Cable'];
     rows = accts.map(a => [a.cliente, a.alyc, a.comitente, a.ars, a.mep, a.div, a.cable]);
