@@ -105,5 +105,12 @@ const SibraBrokers = (() => {
     return { rows, caucionByAccount };
   }
 
-  return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, loadTenencias, loadCauciones };
+  // Bucket de moneda de un ticker de efectivo (o null si no es efectivo).
+  // { ticker, label, bucket } — bucket ∈ ARS/USD_MEP/USD_DIVISA/USD_CABLE.
+  function cashBucket(ticker) {
+    const m = normalizeCash(ticker);
+    return m ? { ticker: m[0], label: m[1], bucket: m[2] } : null;
+  }
+
+  return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, loadTenencias, loadCauciones, cashBucket };
 })();

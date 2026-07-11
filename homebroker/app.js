@@ -392,25 +392,33 @@ function renderCuentasDecidir() {
   </tr>`).join('') : '<tr><td colspan="6" class="na">Sin cauciones vigentes</td></tr>';
 }
 
-// ── Cuenta Corriente: saldos de efectivo por cuenta ($ ARS y U$S nominal),
-//    incluye positivos y negativos. Respeta los filtros. ──
+// ── Cuenta Corriente: saldos de efectivo por cuenta. Los dólares se unifican
+//    entre ALyCs en los 3 buckets (MEP / 7000 / Cable) via SibraBrokers.cashBucket,
+//    así el mismo tipo de dólar suma junto. Incluye positivos y negativos. ──
 function accountCash(rows) {
   const m = {};
-  rows.filter(r => String(r.asset_group).toLowerCase().includes('cuenta corriente')).forEach(r => {
+  rows.forEach(r => {
+    const b = SibraBrokers.cashBucket(r.ticker);
+    // Es efectivo si el ticker está en el mapa de monedas o el grupo es cuenta corriente.
+    if (!b && !String(r.asset_group).toLowerCase().includes('cuenta corriente')) return;
     const key = r.broker_code + '|' + r.account;
-    if (!m[key]) m[key] = { cliente: r.client_name, alyc: r.broker_code, comitente: r.account, ars: 0, usd: 0 };
-    if (String(r.currency).toUpperCase() === 'USD') m[key].usd += parseFloat(r.quantity) || 0;
+    if (!m[key]) m[key] = { cliente: r.client_name, alyc: r.broker_code, comitente: r.account, ars: 0, mep: 0, div: 0, cable: 0 };
+    if (b && b.bucket === 'USD_MEP') m[key].mep += parseFloat(r.quantity) || 0;
+    else if (b && b.bucket === 'USD_DIVISA') m[key].div += parseFloat(r.quantity) || 0;
+    else if (b && b.bucket === 'USD_CABLE') m[key].cable += parseFloat(r.quantity) || 0;
+    else if (String(r.currency).toUpperCase() === 'USD') m[key].mep += parseFloat(r.quantity) || 0; // USD sin mapa -> MEP por defecto
     else m[key].ars += parseFloat(r.market_value_ars) || 0;
   });
-  return Object.values(m).filter(a => a.ars || a.usd).sort((a, b) => Math.abs(b.ars) - Math.abs(a.ars));
+  return Object.values(m).filter(a => a.ars || a.mep || a.div || a.cable).sort((a, b) => Math.abs(b.ars) - Math.abs(a.ars));
 }
 function renderCuentaCorriente() {
   const accts = accountCash(filteredRows());
+  const u = v => v ? fmtUsd0(v) : '—';
   $('#ctacteBody').innerHTML = accts.length ? accts.map(a => `<tr>
     <td>${a.cliente}</td><td>${a.alyc}</td><td>${a.comitente}</td>
     <td class="num">${fmtArs0(a.ars)}</td>
-    <td class="num">${a.usd ? fmtUsd0(a.usd) : '—'}</td>
-  </tr>`).join('') : '<tr><td colspan="5" class="na">Sin saldos de cuenta corriente</td></tr>';
+    <td class="num">${u(a.mep)}</td><td class="num">${u(a.div)}</td><td class="num">${u(a.cable)}</td>
+  </tr>`).join('') : '<tr><td colspan="7" class="na">Sin saldos de cuenta corriente</td></tr>';
 }
 
 // ── Export a Google Sheet (nuevo spreadsheet) del listado filtrado, para
@@ -428,8 +436,8 @@ async function exportSheet(kind) {
   } else {
     const accts = accountCash(filteredRows());
     title = 'SIBRA Cuenta Corriente ' + new Date().toISOString().slice(0, 10);
-    headers = ['Cliente', 'ALyC', 'Comitente', 'Saldo $', 'Saldo U$S'];
-    rows = accts.map(a => [a.cliente, a.alyc, a.comitente, a.ars, a.usd]);
+    headers = ['Cliente', 'ALyC', 'Comitente', 'Saldo $', 'USD MEP', 'USD 7000', 'USD Cable'];
+    rows = accts.map(a => [a.cliente, a.alyc, a.comitente, a.ars, a.mep, a.div, a.cable]);
   }
   if (!rows.length) { toast('No hay filas para exportar.'); return; }
   try {
