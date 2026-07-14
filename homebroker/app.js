@@ -426,11 +426,14 @@ function filteredCtacte() {
 }
 function renderCuentaCorriente() {
   const accts = filteredCtacte();
-  const u = v => v ? fmtUsd0(v) : '—';
-  $('#ctacteBody').innerHTML = accts.length ? accts.map(a => `<tr>
+  // Cada celda de saldo se marca en rojo si es negativa (no solo el ARS que
+  // define el filtro pos/neg) — sirve para ver de un vistazo cuál columna
+  // exacta hay que pedirle a mesa que corrija.
+  const cell = (v, fmt) => `<td class="num${v < 0 ? ' neg-cell' : ''}">${v ? fmt(v) : '—'}</td>`;
+  $('#ctacteBody').innerHTML = accts.length ? accts.map(a => `<tr class="${a.ars < 0 ? 'neg-row' : ''}">
     <td>${a.cliente}</td><td>${a.alyc}</td><td>${a.comitente}</td>
-    <td class="num">${fmtArs0(a.ars)}</td>
-    <td class="num">${u(a.mep)}</td><td class="num">${u(a.div)}</td><td class="num">${u(a.cable)}</td>
+    ${cell(a.ars, fmtArs0)}
+    ${cell(a.mep, fmtUsd0)}${cell(a.div, fmtUsd0)}${cell(a.cable, fmtUsd0)}
   </tr>`).join('') : '<tr><td colspan="7" class="na">Sin saldos de cuenta corriente</td></tr>';
 }
 
