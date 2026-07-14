@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
+<script src="../shared/sibra-brokers-data.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -262,6 +263,7 @@ const hoy  = () => new Date().toISOString().slice(0,10);
 const uid  = () => Date.now()+Math.floor(Math.random()*999);
 const esRF = t => CFG.RENTA_FIJA.some(p=>t.toUpperCase().startsWith(p));
 const normPct = v => { const s=String(v||"").replace("%",""); const n=parseFloat(s); return isNaN(n)?0:(n>1?n/100:n); };
+const normCC = v => { if (!v && v!==0) return ''; const n=parseFloat(String(v).trim()); return isFinite(n)?String(Math.round(n)):String(v).trim(); };
 
 function showLoad(msg="Cargando..."){ $("loading-overlay").classList.add("show"); $("loading-msg").textContent=msg; }
 function hideLoad(){ $("loading-overlay").classList.remove("show"); }
@@ -559,306 +561,94 @@ const Datos = {
     return S.propuestas;
   },
 
-  // ── Cargar TODAS las tenencias de una vez ─────────────
+  // ── Tenencias + cauciones: fuente única SibraBrokers (Sheet TENENCIAS/
+  //    CAUCIONES.CURRENT, alimentado automáticamente por sibra-brokers-repo).
+  //    Reemplaza el parseo de Excel por-ALyC que se subía a mano a Drive.
+  _filaATenencia(t){
+    if(t.esEfectivo) return null;
+    if(!(t.cantidad>0)) return null;
+    return {
+      ticker: t.ticker, especie: t.tipo||t.ticker, cantidad: t.cantidad,
+      pu: Precios.get(t.ticker)||t.precio, importe: t.valor||(t.cantidad*t.precio),
+      esFondo: t.tipo==='FCI',
+    };
+  },
+
+  async _agruparTenencias(fresh=false){
+    const [filas, cauc] = await Promise.all([
+      SibraBrokers.loadTenencias({fresh}),
+      SibraBrokers.loadCauciones({fresh}),
+    ]);
+    const caucByAcc = cauc.caucionByAccount();
+    const caucionDe = (alyc,cc) => {
+      const ccNorm=normCC(cc);
+      for(const key in caucByAcc){
+        const [b,acc]=key.split('|');
+        if(b===alyc && normCC(acc)===ccNorm) return caucByAcc[key];
+      }
+      return {ars:0,usd:0};
+    };
+
+    const porCliente={};
+    for(const cl of S.clientes){
+      const propias=filas.filter(t=>t.alyc===cl.alyc && normCC(t.comitente)===normCC(cl.cc));
+      let cashPesos=0, cashUSD=0;
+      const pos=[];
+      for(const t of propias){
+        if(t.esEfectivo){
+          if(t.bucket==='ARS') cashPesos+=t.cantidad; else cashUSD+=t.cantidad;
+          continue;
+        }
+        const p=Datos._filaATenencia(t);
+        if(p) pos.push(p);
+      }
+      const c=caucionDe(cl.alyc,cl.cc);
+      porCliente[cl.cc]={cashPesos, cashUSD, caucionPesos:c.ars, posiciones:pos};
+    }
+    return porCliente;
+  },
+
+  // ── Cargar TODAS las tenencias de una vez (botón "Cargar tenencias") ──
   async cargarTodasLasTenencias(){
-    S.tenencias={};
-    const alycsSinBCCH = [...new Set(S.clientes.filter(c=>c.alyc!=='BCCH').map(c=>c.alyc))];
-    const alycsBCCH    = S.clientes.filter(c=>c.alyc==='BCCH');
-
-    // ADCAP / IEB: un archivo con todos los comitentes → descargar una vez
-    for(const alyc of alycsSinBCCH){
-      const fId=CFG.DRIVE.ALYCS[alyc]; if(!fId) continue;
-      showLoad(`Descargando tenencias ${alyc}...`);
-      try{
-        const archivos=await Drive.listar(fId);
-        if(!archivos.length){ console.warn(`Sin archivos para ${alyc}`); continue; }
-        const buf=await Drive.bajar(archivos[0].id);
-        const preview=new TextDecoder().decode(buf.slice(0,200)).toLowerCase();
-        const esHTML=preview.includes('<html')||preview.includes('<!doctype');
-        let rows;
-        if(esHTML){
-          const doc=new DOMParser().parseFromString(new TextDecoder().decode(buf),'text/html');
-          const toNum=s=>{const str=String(s||'').trim().replace(/[$\s%]/g,'');if(!str)return str;if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(str))return parseFloat(str.replace(/\./g,'').replace(',','.'));if(/^\d+,\d+$/.test(str))return parseFloat(str.replace(',','.'));return parseFloat(str.replace(/,/g,''))||str;};
-          rows=[...doc.querySelectorAll('tr')].map(tr=>[...tr.querySelectorAll('td,th')].map(c=>toNum(c.textContent.trim())));
-        } else {
-          const hojas=Drive.leerXlsx(buf);
-          const h=Object.keys(hojas).find(n=>/reporte/i.test(n))||Object.keys(hojas)[0];
-          rows=hojas[h]||[];
-        }
-        // Parsear para cada cliente de esta ALYC
-        const clsAlyc=S.clientes.filter(c=>c.alyc===alyc);
-        for(const cl of clsAlyc){
-          try{ S.tenencias[cl.cc]=Datos._parsearADCAP(rows,cl.cc); }
-          catch(e){ console.warn(`[${alyc}] Error parseando ${cl.cc}:`,e); }
-        }
-        console.log(`[${alyc}] ${clsAlyc.length} comitentes parseados`);
-      }catch(e){ console.error(`[${alyc}] Error:`,e.message); toast(`Error cargando ${alyc}: ${e.message}`,'error'); }
+    showLoad('Leyendo tenencias y cauciones (base sibra-brokers)...');
+    try{
+      S.tenencias = await Datos._agruparTenencias(true);
+      hideLoad();
+      const n=Object.keys(S.tenencias).length;
+      toast(`✓ ${n} tenencias cargadas`);
+      return S.tenencias;
+    }catch(e){
+      hideLoad(); toast('Error cargando tenencias: '+e.message,'error'); throw e;
     }
-
-    // BCCH: un archivo por comitente
-    if(alycsBCCH.length){
-      showLoad('Descargando tenencias BCCH...');
-      const fId=CFG.DRIVE.ALYCS['BCCH'];
-      try{
-        const archivos=await Drive.listar(fId);
-        for(const cl of alycsBCCH){
-          const f=archivos.find(a=>a.name.startsWith(String(cl.cc)));
-          if(!f){ console.warn(`Sin tenencia BCCH para ${cl.cc}`); continue; }
-          try{
-            const buf=await Drive.bajar(f.id);
-            S.tenencias[cl.cc]=Datos._parsearBCCH(new TextDecoder().decode(buf));
-          }catch(e){ console.warn(`[BCCH] Error ${cl.cc}:`,e.message); }
-        }
-        console.log(`[BCCH] ${alycsBCCH.length} comitentes procesados`);
-      }catch(e){ console.error('[BCCH] Error:',e.message); toast('Error cargando BCCH: '+e.message,'error'); }
-    }
-
-    hideLoad();
-    const n=Object.keys(S.tenencias).length;
-    toast(`✓ ${n} tenencias cargadas`);
-    return S.tenencias;
   },
 
-  // ── Tenencia IEB ──────────────────────────────────────
-  _parsearIEB(rows, cc){
-    const ccStr = String(cc).trim();
-    const filas = rows.slice(1).filter(r=>String(r[1]||"").trim()===ccStr);
-    let cashPesos=0, cashUSD=0, caucionPesos=0;
-    const pos=[];
-    for(const r of filas){
-      const ticker  = String(r[5]||"").trim();
-      const codigo  = String(r[4]||"").trim();
-      const cantidad= parseFloat(r[8])||0;
-      const precio  = parseFloat(r[9])||0;
-      const importe = parseFloat(r[10])||0;
-      const tipoEsp = parseInt(r[15])||0;
-      if(ticker==="Pesos"||ticker==="$"){
-        if(importe<0) caucionPesos=Math.abs(importe);
-        else cashPesos=Math.max(Math.abs(cantidad),Math.abs(importe));
-        continue;
-      }
-      if(ticker==="USD"||ticker==="DOLARUSA"){
-        cashUSD = cantidad>0 ? cantidad : (precio>0?Math.abs(importe)/precio:0);
-        continue;
-      }
-      if((ticker==="-"||ticker==="")&&(codigo==="-"||codigo==="")){ if(importe<0) caucionPesos=Math.abs(importe); continue; }
-      if(tipoEsp===5 && ticker && importe!==0){
-        pos.push({ticker:ticker.toUpperCase(),especie:String(r[6]||"").trim(),
-          cantidad:Math.abs(cantidad)||(precio>0?Math.abs(importe)/precio:0),pu:precio,importe:Math.abs(importe),esFondo:true});
-        continue;
-      }
-      if(ticker&&ticker!=="-"&&Math.abs(cantidad)>0){
-        pos.push({ticker:ticker.toUpperCase(),especie:String(r[6]||"").trim(),
-          cantidad:Math.abs(cantidad),pu:precio,importe:Math.abs(importe),esFondo:false});
-      }
-    }
-    return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
-  },
-
-  // ── Tenencia ADCAP ────────────────────────────────────
-  _parsearADCAP(rows, cc){
-    // Portado directamente de parseADCAP() en módulo "actual" — probado y funciona
-    // col A (0) = comitente/ticker/grupo; col D (3) = tenencia total; col I (8) = precio; col L (11) = importe
-    const ccStr=String(cc).trim();
-    let cashPesos=0,cashUSD=0,caucionPesos=0;
-    const pos=[];
-    const IGNORAR    = /posici[oó]n informativa|posiciones tomadas|colocadas/i;
-    const CASH_ARS_R = /^\$\s*-|^pesos/i;
-    const CASH_USD_R = /dolar\s*7000|dolar\s*mep|dolar\s*cable|usd\s*7000|usd\s*[cdo]\s*-/i;
-    let ticker=null, ignorarBloque=false;
-
-    for(const r of rows){
-      const col0=String(r[0]??'').trim();
-      if(!col0) continue;
-      if(IGNORAR.test(col0)){ ignorarBloque=true; ticker=null; continue; }
-      const esNum=!isNaN(col0)&&col0!=='';
-
-      if(!esNum&&col0.includes(' / ')&&!col0.includes(' - ')){
-        ignorarBloque=false; ticker=null; continue;
-      }
-      if(!esNum&&col0.includes(' - ')){
-        if(ignorarBloque) continue;
-        if(CASH_ARS_R.test(col0))      ticker='CASH_ARS';
-        else if(CASH_USD_R.test(col0)) ticker='CASH_USD';
-        else                           ticker=col0.split(' - ')[0].trim().toUpperCase();
-        continue;
-      }
-      if(esNum&&ticker&&!ignorarBloque&&col0===ccStr){
-        const val=parseFloat(r[3]);
-        if(!isFinite(val)) continue;
-        if(ticker==='CASH_ARS'){
-          if(val<0) caucionPesos=Math.abs(val); else cashPesos+=val;
-        } else if(ticker==='CASH_USD'){
-          cashUSD+=Math.abs(val);
-        } else if(val>0){
-          const precio=parseFloat(r[8])||0;
-          const importe=parseFloat(r[11])||0;
-          const pu=Precios.get(ticker)||precio;
-          pos.push({ticker,especie:ticker,cantidad:val,pu,importe:importe||val*pu,esFondo:false});
-        }
-      }
-    }
-    return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
-  },
-
-  // ── Tenencia ADCAP (HTML disfrazado de XLS) ───────────
-  _parsearADCAPhtml(htmlStr, cc){
-    const doc = new DOMParser().parseFromString(htmlStr,"text/html");
-    // Parsea string numérico en formato argentino (1.234.567,89) o americano
-    const toNum = s => {
-      const str=String(s||"").trim().replace(/[$\s%]/g,"");
-      if(!str) return str;
-      // Formato argentino: tiene punto como miles y coma como decimal
-      if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(str)) return parseFloat(str.replace(/\./g,"").replace(",","."));
-      // Coma como decimal simple: "6,9300"
-      if(/^\d+,\d+$/.test(str)) return parseFloat(str.replace(",","."));
-      return parseFloat(str.replace(/,/g,""))||str;
-    };
-    const rows=[];
-    for(const tr of doc.querySelectorAll("tr")){
-      rows.push([...tr.querySelectorAll("td,th")].map(c=>toNum(c.textContent.trim())));
-    }
-    return Datos._parsearADCAP(rows, cc);
-  },
-
-  // ── Tenencia BCCH ─────────────────────────────────────
-  _parsearBCCH(htmlStr){
-    // Números en formato argentino: 1.234.567,89 → hay que invertir sep
-    const parseARS = s => {
-      if(!s) return 0;
-      // quitar $, espacios, y el punto de miles; reemplazar coma decimal por punto
-      const clean = String(s).replace(/[$ ]/g,"").replace(/\./g,"").replace(",",".");
-      return parseFloat(clean)||0;
-    };
-
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlStr,"text/html");
-    const tablas = [...doc.querySelectorAll("table")];
-    let cashPesos=0, cashUSD=0, caucionPesos=0;
-    const pos=[];
-    if(!tablas.length) return {cashPesos,cashUSD,caucionPesos,posiciones:pos};
-
-    // ── Tabla de resumen (primera tabla grande con "Pesos", "U$S") ──
-    // Buscar la tabla que tiene "Cuenta Corriente $" o "Pesos"
-    for(const tbl of tablas){
-      for(const tr of tbl.querySelectorAll("tr")){
-        const cels = [...tr.querySelectorAll("td,th")].map(c=>c.textContent.trim());
-        const txt0 = (cels[0]||"").toLowerCase();
-        const txt1 = (cels[1]||"").toLowerCase();
-
-        // Cuenta Corriente $ → cash pesos
-        if(txt1.includes("cuenta corriente $")||txt0.includes("cuenta corriente $")){
-          // El importe está en la col 4 (índice 4)
-          const imp = parseARS(cels[4]||cels[5]||"");
-          cashPesos = Math.abs(imp);
-          continue;
-        }
-        // Cuenta Corriente U$S → cash USD (cantidad en col 2, TC en col 3)
-        if(txt1.includes("cuenta corriente u")||txt0.includes("cuenta corriente u")){
-          const cantUSD = parseARS(cels[2]||"");
-          cashUSD = Math.abs(cantUSD);
-          continue;
-        }
-        // Pesos (fila de detalle simple)
-        if((txt1==="pesos "||txt1==="pesos"||txt0==="pesos")&&cels.length>4){
-          const imp = parseARS(cels[4]||cels[5]||"");
-          if(imp>0) cashPesos = imp;
-          continue;
-        }
-        // U$S (fila de detalle simple)
-        if((txt1==="u$s "||txt1==="u$s"||txt0==="u$s")&&cels.length>3){
-          const cantUSD = parseARS(cels[3]||"");
-          if(cantUSD) cashUSD = Math.abs(cantUSD);
-          continue;
-        }
-      }
-    }
-
-    // ── Tabla de posiciones (tiene columnas: Nombre | Estado | Cantidad | Precio | Importe | %...) ──
-    // Buscar la tabla con thead que tenga "Cantidad" y "Precio"
-    for(const tbl of tablas){
-      const thead = tbl.querySelector("thead");
-      if(!thead) continue;
-      const thTexts = [...thead.querySelectorAll("th")].map(t=>t.textContent.trim().toLowerCase());
-      const hasCant  = thTexts.some(t=>t.includes("cantidad"));
-      const hasPrecio= thTexts.some(t=>t.includes("precio"));
-      if(!hasCant||!hasPrecio) continue;
-
-      // Esta es la tabla de posiciones
-      for(const tr of tbl.querySelectorAll("tbody tr")){
-        const cels = [...tr.querySelectorAll("td")].map(c=>c.textContent.trim());
-        if(cels.length<4) continue;
-
-        // Col 1: "TICKER NOMBRE ESPECIE" — el ticker es la primera palabra
-        const raw = String(cels[1]||"").trim();
-        if(!raw||raw.toLowerCase().includes("subtotal")) continue;
-
-        const partes = raw.split(/\s+/);
-        const ticker = partes[0].toUpperCase();
-        if(!ticker||ticker.length<2||ticker.length>8) continue;
-
-        // Col 3: Cantidad (ej: "395,00")
-        const cantidad = parseARS(cels[3]);
-        // Col 4: Precio (ej: "9.390,000")  
-        const precio   = parseARS(cels[4]);
-        // Col 5: Importe (ej: "3.709.050,00")
-        const importe  = parseARS(cels[5]);
-
-        if(cantidad<=0) continue;
-
-        // Usar precio live si existe, sino precio del archivo
-        const pu = Precios.get(ticker) || precio;
-        pos.push({ticker, especie:raw, cantidad, pu, importe:importe||cantidad*pu, esFondo:false});
-      }
-      break; // solo procesar la primera tabla de posiciones
-    }
-
-    console.log(`[BCCH] cash=$${cashPesos.toFixed(0)} USD=${cashUSD.toFixed(2)} pos=${pos.length}`);
-    return {cashPesos, cashUSD, caucionPesos, posiciones:pos};
-  },
-
-  // ── Cargar tenencia según ALYC ────────────────────────
+  // ── Cargar tenencia de UN cliente (fallback si no se usó el botón de arriba) ──
   async cargarTenencia(alyc, cc){
-    const fId = CFG.DRIVE.ALYCS[alyc];
-    if(!fId) throw new Error("ALYC desconocida: "+alyc);
-    const archivos = await Drive.listar(fId);
-    if(!archivos.length) throw new Error("Sin archivos de tenencia para "+alyc);
+    const [filas, cauc] = await Promise.all([
+      SibraBrokers.loadTenencias(),
+      SibraBrokers.loadCauciones(),
+    ]);
+    const ccNorm=normCC(cc);
+    const propias=filas.filter(t=>t.alyc===alyc && normCC(t.comitente)===ccNorm);
+    if(!propias.length) throw new Error(`Sin tenencia para comitente ${cc} en ${alyc}`);
 
-    if(alyc==="BCCH"){
-      // Un archivo por comitente (nombre = CC)
-      const f = archivos.find(a=>a.name.startsWith(String(cc)));
-      if(!f) throw new Error(`Sin tenencia para comitente ${cc} en BCCH`);
-      const buf = await Drive.bajar(f.id);
-      // Es HTML disfrazado de XLS — leer como texto
-      const htmlStr = new TextDecoder().decode(buf);
-      return Datos._parsearBCCH(htmlStr);
-    }
-
-    // IEB y ADCAP: un único archivo con todos los comitentes
-    const buf = await Drive.bajar(archivos[0].id);
-
-    // Detectar si es HTML disfrazado de XLS (común en ADCAP)
-    const preview = new TextDecoder().decode(buf.slice(0,200)).toLowerCase();
-    const esHTML  = preview.includes("<html") || preview.includes("<!doctype");
-
-    if(alyc==="ADCAP"){
-      if(esHTML){
-        const htmlStr = new TextDecoder().decode(buf);
-        return Datos._parsearADCAPhtml(htmlStr, cc);
+    let cashPesos=0, cashUSD=0;
+    const pos=[];
+    for(const t of propias){
+      if(t.esEfectivo){
+        if(t.bucket==='ARS') cashPesos+=t.cantidad; else cashUSD+=t.cantidad;
+        continue;
       }
-      const hojas = Drive.leerXlsx(buf);
-      const nombreHoja = Object.keys(hojas).find(n=>n.toLowerCase().includes("reporte")||n==="Sheet1")||Object.keys(hojas)[0];
-      return Datos._parsearADCAP(hojas[nombreHoja]||[], cc);
+      const p=Datos._filaATenencia(t);
+      if(p) pos.push(p);
     }
-
-    const hojas = Drive.leerXlsx(buf);
-    const nombreHoja = Object.keys(hojas).find(n=>n.toLowerCase().includes("reporte")||n==="Sheet1")||Object.keys(hojas)[0];
-    const rows = hojas[nombreHoja]||[];
-
-    if(alyc==="IEB") return Datos._parsearIEB(rows, cc);
-
-    // Fallback genérico igual a IEB
-    return Datos._parsearIEB(rows, cc);
+    const byAcc=cauc.caucionByAccount();
+    let caucionPesos=0;
+    for(const key in byAcc){
+      const [b,acc]=key.split('|');
+      if(b===alyc && normCC(acc)===ccNorm){ caucionPesos=byAcc[key].ars; break; }
+    }
+    return {cashPesos, cashUSD, caucionPesos, posiciones:pos};
   },
 };
 
