@@ -36,6 +36,70 @@ const SibraBrokers = (() => {
     return CASH_MAP[String(ticker || '').trim()] || null;
   }
 
+  // ───────────────────────────────────────────────────────────────
+  //  Clasificación de instrumentos (TIPO) → precios data912
+  //  Fuente: la base PAPELES (columnas GRUPO/SUBGRUPO/SUBTIPO por SIMBOLO).
+  //  El diccionario traduce esas etiquetas de negocio al TIPO canónico y a
+  //  DÓNDE está el precio en data912:
+  //    panelSpot    = /live/<panelSpot>            (precio actual; null = no listado)
+  //    histEndpoint = /historical/<histEndpoint>/<ticker> (cierre diario; null = sin serie)
+  //    escala       = divisor del precio crudo: bonos/ON/letras cotizan cada 100 VN → 100
+  //  data912 sólo publica histórico de stocks/cedears/bonds; ON y LETRAS
+  //  apuntan a 'bonds' pero puede no existir la serie (se resuelve ticker a ticker).
+  const TIPO_INFO = {
+    ACCION_ARG:  { panelSpot: 'arg_stocks',  histEndpoint: 'stocks',  escala: 1   },
+    CEDEAR:      { panelSpot: 'arg_cedears', histEndpoint: 'cedears', escala: 1   },
+    ETF:         { panelSpot: 'arg_cedears', histEndpoint: 'cedears', escala: 1   },
+    BONO:        { panelSpot: 'arg_bonds',   histEndpoint: 'bonds',   escala: 100 },
+    ON:          { panelSpot: 'arg_corp',    histEndpoint: 'bonds',   escala: 100 },
+    LETRA:       { panelSpot: 'arg_notes',   histEndpoint: 'bonds',   escala: 100 },
+    FCI:         { panelSpot: null,          histEndpoint: null,      escala: 1   },
+    CASH_ARS:    { panelSpot: null,          histEndpoint: null,      escala: 1   },
+    CASH_USD:    { panelSpot: null,          histEndpoint: null,      escala: 1   },
+    DESCONOCIDO: { panelSpot: null,          histEndpoint: null,      escala: 1   },
+  };
+  // SUBGRUPO de PAPELES → TIPO (fuente primaria).
+  const SUBGRUPO_TIPO = {
+    GENERAL: 'ACCION_ARG', LIDER: 'ACCION_ARG', CEDEAR: 'CEDEAR',
+    BONOS: 'BONO', ON: 'ON', LETRAS: 'LETRA', FCI: 'FCI', CASH: 'CASH_ARS',
+  };
+  // GRUPO de PAPELES → TIPO (fallback grueso cuando el SUBGRUPO no está mapeado).
+  const GRUPO_TIPO = { RF: 'BONO', RV: 'ACCION_ARG', CASH: 'CASH_ARS', FCI: 'FCI' };
+  // Fallback por patrón de ticker cuando el papel no está en PAPELES: renta fija
+  // soberana/subsoberana y letras (mismo criterio que actual/clasificarTicker).
+  const RE_RENTA_FIJA = /^(AL|GD|AE|TX|TZX|T2X|DICP|PARP|CUAP|TTD|TZV|BPOC|BPOD|S\d{1,2}[A-Z]|T\d)/;
+
+  // Clasifica un ticker. `papelesEntry` = fila de PAPELES {grupo, subgrupo, subtipo}
+  // (o null si el papel no está en la base). Devuelve TIPO + info de precios data912.
+  function clasificar(ticker, papelesEntry) {
+    const tk = String(ticker || '').trim().toUpperCase();
+    // 1) Efectivo (usa el CASH_MAP unificado entre ALyCs).
+    const cash = normalizeCash(ticker);
+    if (cash) {
+      const tipo = cash[2] === 'ARS' ? 'CASH_ARS' : 'CASH_USD';
+      return { tipo, ...TIPO_INFO[tipo], fuente: 'CASH' };
+    }
+    // 2) PAPELES: SUBGRUPO manda, luego GRUPO; SUBTIPO sólo marca ETF (se cotiza como cedear).
+    if (papelesEntry) {
+      const grupo    = String(papelesEntry.grupo    || '').toUpperCase().trim();
+      const subgrupo = String(papelesEntry.subgrupo || '').toUpperCase().trim();
+      const subtipo  = String(papelesEntry.subtipo  || '').toUpperCase().trim();
+      let tipo = SUBGRUPO_TIPO[subgrupo] || GRUPO_TIPO[grupo] || null;
+      if (tipo === 'CEDEAR' && (subtipo === 'ETF' || subtipo === 'ET')) tipo = 'ETF';
+      if (tipo) return { tipo, ...TIPO_INFO[tipo], fuente: 'PAPELES' };
+    }
+    // 3) Fallback por patrón de ticker (papel no encontrado en PAPELES).
+    if (RE_RENTA_FIJA.test(tk)) return { tipo: 'BONO', ...TIPO_INFO.BONO, fuente: 'REGEX' };
+    return { tipo: 'DESCONOCIDO', ...TIPO_INFO.DESCONOCIDO, fuente: 'NINGUNA' };
+  }
+
+  // Precio unitario ajustado por escala. rawPrice = campo `c` (cierre) de data912;
+  // los bonos/ON/letras vienen cada 100 VN, así que se divide por la escala.
+  function precioUnitario(rawPrice, escala) {
+    const p = num(rawPrice);
+    return escala && escala !== 1 ? p / escala : p;
+  }
+
   async function sheetValues(sheetId, range, { fresh = false } = {}) {
     const token = SibraAuth.getToken();
     if (!token) throw new Error('No hay sesión de Google. Conectate primero.');
@@ -112,5 +176,6 @@ const SibraBrokers = (() => {
     return m ? { ticker: m[0], label: m[1], bucket: m[2] } : null;
   }
 
-  return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, loadTenencias, loadCauciones, cashBucket };
+  return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, loadTenencias, loadCauciones, cashBucket,
+           clasificar, precioUnitario, TIPO_INFO };
 })();
