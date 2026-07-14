@@ -488,7 +488,26 @@ async function load(fresh = false) {
     allCauciones = [];
     toast('No se pudieron cargar las cauciones: ' + e.message);
   }
-  refreshFilterLabels(); render();
+  refreshFilterLabels(); render(); updateRefreshBadge();
+}
+
+// Muestra la última vez que el backend escribió las tenencias (columna
+// refreshed_at, la más reciente entre todas las filas). Si pasaron más de 15
+// minutos lo marca en rojo: la base está vieja y hay que reloguear el broker
+// o reiniciar el server local — no es la caché del frontend.
+function updateRefreshBadge() {
+  const badge = $('#refreshBadge');
+  if (!badge) return;
+  const stamps = allRows.map(r => r.refreshed_at).filter(Boolean).sort();
+  const last = stamps[stamps.length - 1];
+  if (!last) { badge.classList.add('hidden'); return; }
+  const d = new Date(last.replace(' ', 'T'));
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  const cuando = mins < 1 ? 'recién' : mins < 60 ? `hace ${mins} min`
+    : mins < 1440 ? `hace ${Math.round(mins / 60)} h` : `hace ${Math.round(mins / 1440)} d`;
+  badge.textContent = `Datos: ${cuando}`;
+  badge.classList.remove('hidden');
+  badge.classList.toggle('stale', mins > 15);
 }
 
 $('#clear').onclick = () => {

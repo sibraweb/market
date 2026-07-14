@@ -56,6 +56,9 @@ header small{color:var(--accent);font-size:var(--fs-micro,.6rem);letter-spacing:
 .ccy{background:transparent;border:0;color:var(--muted);padding:.5rem .9rem;font-size:var(--fs-sm,.85rem);font-weight:var(--fw-semibold,600);cursor:pointer}
 .ccy.active{background:var(--accent);color:#fff}
 .mep-badge{font-size:var(--fs-sm,.85rem);color:var(--muted);font-family:var(--font-aux,monospace)}
+/* Badge de "última actualización" cuando la base quedó vieja (>15 min): se
+   pone rojo para avisar que el problema es el backend, no el frontend. */
+#refreshBadge.stale{color:var(--accent, #e10600);font-weight:var(--fw-semibold,600)}
 
 /* ── Filters (multiselect con buscador) ───────────────────────── */
 .filters{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr)) auto;gap:var(--space-3,.8rem);
