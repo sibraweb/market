@@ -1692,7 +1692,7 @@ function initAC() {
         const key = `${p.alyc}|${p.comitente}`;
         if (seen.has(key)) return;
         seen.add(key);
-        const cli = findCliente(p.comitente);
+        const cli = findCliente(p.comitente, p.alyc);
         const nombre = cli?.cliente || p.comitente;
         const full = `${nombre} ${p.comitente} ${p.alyc}`.toLowerCase();
         if (!q || full.includes(q)) {
@@ -2135,9 +2135,18 @@ function normCC(val) {
   return isFinite(n) ? String(Math.round(n)) : s;
 }
 
-// Match robusto: normaliza ambos lados antes de comparar
-function findCliente(comitente) {
+// Match robusto: normaliza ambos lados antes de comparar. El número de
+// comitente SE REPITE entre brokers (confirmado en sync_service.py del
+// backend: "el número de comitente solo no alcanza, se repite entre
+// brokers") — por eso, si se pasa `alyc`, matchea por (alyc, cc) y no solo
+// por cc, para no cruzar la caución/perfil de un cliente de otro broker que
+// por coincidencia tenga el mismo número de cuenta.
+function findCliente(comitente, alyc) {
   const norm = normCC(comitente);
+  if (alyc) {
+    const exact = S.clientes.find(c => normCC(c.cc) === norm && c.alyc === alyc);
+    if (exact) return exact;
+  }
   return S.clientes.find(c => normCC(c.cc) === norm);
 }
 
@@ -2267,22 +2276,31 @@ async function loadData(fresh = false) {
     }));
     // 4) Cauciones desde la base: se OVERLAYAN sobre el maestro de clientes (el
     //    perfil viene de Drive; las cauciones, de la base — ya no del Excel).
+    // Clave (alyc, cc) y NO cc solo: el número de comitente se repite entre
+    // brokers (confirmado en sync_service.py del backend), así que indexar
+    // solo por cc cruza/pisa la caución de un cliente con la de otro que por
+    // coincidencia comparte número de cuenta en otro broker.
     const { caucionByAccount } = await SibraBrokers.loadCauciones({ fresh });
     const cauc = caucionByAccount();
-    const caucByCC = {};
-    for (const key in cauc) caucByCC[normCC(key.split('|')[1])] = cauc[key];
+    const caucByAlycCC = {};
+    for (const key in cauc) {
+      const [b, acc] = key.split('|');
+      caucByAlycCC[`${b}|${normCC(acc)}`] = cauc[key];
+    }
     S.clientes.forEach(c => {
-      const f = caucByCC[normCC(c.cc)] || { ars: 0, usd: 0 };
+      const f = caucByAlycCC[`${c.alyc}|${normCC(c.cc)}`] || { ars: 0, usd: 0 };
       c.caucionPesos = f.ars; c.caucionDolares = f.usd;
     });
-    // Comitentes que están en tenencias pero no en el maestro -> se agregan.
-    const known = new Set(S.clientes.map(c => normCC(c.cc)));
+    // Comitentes que están en tenencias pero no en el maestro -> se agregan
+    // (misma clave alyc+cc, para no perder cuentas cuyo número se repite en
+    // otro broker que sí está en el maestro).
+    const known = new Set(S.clientes.map(c => `${c.alyc}|${normCC(c.cc)}`));
     ten.forEach(t => {
-      const cc = normCC(t.comitente);
-      if (known.has(cc)) return;
-      known.add(cc);
-      const f = caucByCC[cc] || { ars: 0, usd: 0 };
-      S.clientes.push({ cc: t.comitente, cliente: t.cliente, perfil: 'AGRESIVO', caucionPesos: f.ars, caucionDolares: f.usd });
+      const key = `${t.alyc}|${normCC(t.comitente)}`;
+      if (known.has(key)) return;
+      known.add(key);
+      const f = caucByAlycCC[key] || { ars: 0, usd: 0 };
+      S.clientes.push({ cc: t.comitente, cliente: t.cliente, alyc: t.alyc, perfil: 'AGRESIVO', caucionPesos: f.ars, caucionDolares: f.usd });
     });
     SibraCache.set('actual_posiciones', S.posiciones);
     if ($('kpiPos')) $('kpiPos').textContent = S.posiciones.length;
@@ -2351,7 +2369,7 @@ function renderCartaGlobal() {
 
   Object.entries(grupos).forEach(([key, pos]) => {
     const [alyc, comitente] = key.split('|');
-    const cli = findCliente(comitente);
+    const cli = findCliente(comitente, alyc);
     const cartela = valuarCartera(pos);
 
     // Tenencia neta = suma de todas las posiciones de la ALyC (incluye cash)
@@ -2770,20 +2788,25 @@ function actualizarAllocations() {
   const f = S.allocFilters;
 
   // ── Neta y bruta TOTAL por cuenta (sin filtro), igual que en Cartera ──
+  // Clave (alyc, comitente) y NO comitente solo: el número de cuenta se
+  // repite entre brokers, así que agrupar solo por comitente mezclaría las
+  // tenencias de dos clientes distintos que comparten número de cuenta.
   const porCuenta = {};
   S.posiciones.forEach(p => {
-    if (!porCuenta[p.comitente]) porCuenta[p.comitente] = [];
-    porCuenta[p.comitente].push(p);
+    const key = `${p.alyc}|${p.comitente}`;
+    if (!porCuenta[key]) porCuenta[key] = [];
+    porCuenta[key].push(p);
   });
-  const cuentaInfo = {}; // comitente -> { cliente, netaCliente, brutaCliente }
-  Object.entries(porCuenta).forEach(([comitente, pos]) => {
-    const cli = findCliente(comitente);
+  const cuentaInfo = {}; // "alyc|comitente" -> { cliente, netaCliente, brutaCliente }
+  Object.entries(porCuenta).forEach(([key, pos]) => {
+    const [alyc, comitente] = key.split('|');
+    const cli = findCliente(comitente, alyc);
     const cartela = valuarCartera(pos);
     const netaCliente = cartela.reduce((s, p) => s + p.valor, 0);
     const caucionPesos   = cli?.caucionPesos   || 0;
     const caucionDolares = cli?.caucionDolares || 0;
     const brutaCliente = netaCliente + caucionPesos + caucionDolares * mep;
-    cuentaInfo[comitente] = { cliente: cli?.cliente || comitente, netaCliente, brutaCliente };
+    cuentaInfo[key] = { cliente: cli?.cliente || comitente, netaCliente, brutaCliente };
   });
   const totalNetaGlobal  = Object.values(cuentaInfo).reduce((s, c) => s + c.netaCliente,  0);
   const totalBrutaGlobal = Object.values(cuentaInfo).reduce((s, c) => s + c.brutaCliente, 0);
@@ -2805,25 +2828,28 @@ function actualizarAllocations() {
     CASH_ARS:'pill-gray', CASH_USD:'pill-gray', DESCONOCIDO:'pill-gray' };
 
   // ── Cuentas: % neto y % bruto siempre sobre el total de ESA cuenta (no sobre el filtro) ──
+  // Misma clave alyc|comitente que cuentaInfo, por la misma razón (comitente
+  // repetido entre brokers).
   const cuentasMap = {};
   posFiltered.forEach(p => {
+    const key = `${p.alyc}|${p.comitente}`;
     const tipo = clasificarTicker(p.ticker, S.allocation[p.ticker]);
     const val  = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
-    if (!cuentasMap[p.comitente])
-      cuentasMap[p.comitente] = { comitente: p.comitente, cliente: cuentaInfo[p.comitente]?.cliente || p.comitente, valor: 0, tickers: new Set() };
-    cuentasMap[p.comitente].valor += val;
-    cuentasMap[p.comitente].tickers.add(p.ticker);
+    if (!cuentasMap[key])
+      cuentasMap[key] = { comitente: p.comitente, alyc: p.alyc, cliente: cuentaInfo[key]?.cliente || p.comitente, valor: 0, tickers: new Set() };
+    cuentasMap[key].valor += val;
+    cuentasMap[key].tickers.add(p.ticker);
   });
   const cuentasOrdenadas = Object.values(cuentasMap).sort((a, b) => b.valor - a.valor);
   const totalFiltro = cuentasOrdenadas.reduce((s, c) => s + c.valor, 0);
 
   $('allocClientesTbody').innerHTML = cuentasOrdenadas.length
     ? cuentasOrdenadas.map(c => {
-        const info = cuentaInfo[c.comitente] || { netaCliente: 0, brutaCliente: 0 };
+        const info = cuentaInfo[`${c.alyc}|${c.comitente}`] || { netaCliente: 0, brutaCliente: 0 };
         const pctNeto  = info.netaCliente  > 0 ? c.valor / info.netaCliente  * 100 : 0;
         const pctBruto = info.brutaCliente > 0 ? c.valor / info.brutaCliente * 100 : 0;
         return `<tr>
-          <td><strong>${c.cliente}</strong><br><span style="font-size:10px;color:var(--text3)">${c.comitente}</span></td>
+          <td><strong>${c.cliente}</strong><br><span style="font-size:10px;color:var(--text3)">${c.comitente} · ${c.alyc}</span></td>
           <td class="td-num"><strong>${fmtPct(pctNeto)}</strong></td>
           <td class="td-num" style="color:var(--text2)"><strong>${fmtPct(pctBruto)}</strong></td>
           <td class="td-num">$${fmt(c.valor)}</td>
@@ -3057,7 +3083,7 @@ function calcularRotacion() {
   const pos = S.posiciones.filter(p => p.comitente === comitente && (!alyc || p.alyc === alyc));
   const cartela = valuarCartera(pos);
   const totalCartera = cartela.reduce((s, p) => s + p.valor, 0);
-  const cli = findCliente(comitente);
+  const cli = findCliente(comitente, alyc);
   const perfil = (cli?.perfil || 'AGRESIVO').toUpperCase();
   const modelo = S.modelos[perfil] || {};
 
