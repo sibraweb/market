@@ -491,23 +491,46 @@ async function load(fresh = false) {
   refreshFilterLabels(); render(); updateRefreshBadge();
 }
 
-// Muestra la última vez que el backend escribió las tenencias (columna
-// refreshed_at, la más reciente entre todas las filas). Si pasaron más de 15
-// minutos lo marca en rojo: la base está vieja y hay que reloguear el broker
-// o reiniciar el server local — no es la caché del frontend.
+// Antigüedad en minutos de un refreshed_at (formato del backend:
+// "2026-07-14T10:00:00", hora local). null si no parsea.
+function _minsDesde(stamp) {
+  if (!stamp) return null;
+  const d = new Date(String(stamp).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return null;
+  return Math.round((Date.now() - d.getTime()) / 60000);
+}
+function _cuando(mins) {
+  return mins < 1 ? 'recién' : mins < 60 ? `hace ${mins} min`
+    : mins < 1440 ? `hace ${Math.round(mins / 60)} h` : `hace ${Math.round(mins / 1440)} d`;
+}
+
+// Muestra la frescura de las tenencias POR BROKER (columna refreshed_at, la más
+// reciente de cada broker). El badge refleja el broker MÁS VIEJO — así, si BCCH
+// e IEB están frescos pero ADCAP quedó clavado hace horas, el badge se pone rojo
+// y no te oculta el problema. El detalle por broker va en el tooltip.
 function updateRefreshBadge() {
   const badge = $('#refreshBadge');
   if (!badge) return;
-  const stamps = allRows.map(r => r.refreshed_at).filter(Boolean).sort();
-  const last = stamps[stamps.length - 1];
-  if (!last) { badge.classList.add('hidden'); return; }
-  const d = new Date(last.replace(' ', 'T'));
-  const mins = Math.round((Date.now() - d.getTime()) / 60000);
-  const cuando = mins < 1 ? 'recién' : mins < 60 ? `hace ${mins} min`
-    : mins < 1440 ? `hace ${Math.round(mins / 60)} h` : `hace ${Math.round(mins / 1440)} d`;
-  badge.textContent = `Datos: ${cuando}`;
+  // último refreshed_at por broker
+  const porBroker = {};
+  allRows.forEach(r => {
+    const b = r.broker_code || r.source; if (!b || !r.refreshed_at) return;
+    if (!porBroker[b] || r.refreshed_at > porBroker[b]) porBroker[b] = r.refreshed_at;
+  });
+  const brokers = Object.keys(porBroker).sort();
+  if (!brokers.length) { badge.classList.add('hidden'); return; }
+  const edades = brokers.map(b => ({ b, mins: _minsDesde(porBroker[b]) })).filter(x => x.mins !== null);
+  if (!edades.length) { badge.classList.add('hidden'); return; }
+  const peor = edades.reduce((a, x) => x.mins > a.mins ? x : a);
+  // badge = broker más viejo; si hay más de uno, se nombra cuál
+  badge.textContent = edades.length > 1
+    ? `${peor.b}: ${_cuando(peor.mins)}`
+    : `Datos: ${_cuando(peor.mins)}`;
+  badge.title = 'Última actualización de tenencias por broker:\n'
+    + edades.map(x => `  ${x.b}: ${_cuando(x.mins)}${x.mins > 15 ? '  ⚠ viejo' : ''}`).join('\n')
+    + '\n\nSi un broker quedó viejo, hay que reloguearlo o reiniciar el server local — no es la caché del frontend.';
   badge.classList.remove('hidden');
-  badge.classList.toggle('stale', mins > 15);
+  badge.classList.toggle('stale', peor.mins > 15);
 }
 
 $('#clear').onclick = () => {
