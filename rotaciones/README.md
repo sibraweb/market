@@ -1,73 +1,42 @@
 # Módulo 3 — Rotaciones · Sibratech
 
-App web de rotación de carteras de inversión. Lee tenencias desde Google Drive, calcula ventas y compras sugeridas, y guarda las órdenes en Drive.
+App web de rotación de carteras de inversión. Lee tenencias y cauciones de la
+base sibra-brokers, calcula ventas y compras sugeridas, y guarda las órdenes
+en Drive.
 
-## Setup en 3 pasos
+Todo el código vive en `index.html` (config, auth, cálculo y UI inline). La
+sesión de Google es compartida con el resto de Market Suite vía
+`../shared/sibra-auth.js` / `../shared/sibra-cache.js` — no hay Client ID ni
+API Key para configurar acá.
 
-### 1. Google Cloud Console
+## Fuentes de datos
 
-1. Ir a [console.cloud.google.com](https://console.cloud.google.com)
-2. Crear proyecto o seleccionar el existente de Sibratech
-3. Habilitar las APIs:
-   - **Google Drive API**
-   - **Google Sheets API**
-   - **Google Identity Services**
+- **Tenencias + cauciones**: `../shared/sibra-brokers-data.js` →
+  `SibraBrokers.loadTenencias()` / `loadCauciones()`, que leen los Sheets
+  `TENENCIAS.CURRENT` / `CAUCIONES.CURRENT` (alimentados automáticamente por
+  `sibra-brokers-repo`, sin subir Excel a mano). Cubre ADCAP / IEB / BCCH
+  (`CFG.ALYCS_SOPORTADAS`).
+- **Clientes**: Sheet en Drive (`CFG.DRIVE.CARPETA_CLIENTES`) — perfil,
+  pesos LP/MP/CP/CASH, caución fija.
+- **Carteras modelo**: archivo en Drive (`CFG.DRIVE.CARPETA_PAPELES`),
+  pestañas AGRESIVO / MODERADO / CONSERVADOR.
+- **Precios live**: [data912.com](https://data912.com) → renta fija se
+  divide /100. Tipo de cambio: AL30 / AL30D.
 
-4. Crear **OAuth 2.0 Client ID**:
-   - Tipo: Web application
-   - Authorized JavaScript origins: `https://sibraweb.github.io`
-   - Authorized redirect URIs: `https://sibraweb.github.io/market/rotaciones/`
-   - Copiar el **Client ID**
+## Escritura
 
-5. Crear **API Key**:
-   - APIs & Services → Credentials → Create Credentials → API Key
-   - Restringir a: Drive API + Sheets API
-   - Copiar la **API Key**
-
-### 2. Configurar index.html
-
-Abrir `index.html` y reemplazar en el bloque CONFIG (línea ~270):
-
-```js
-CLIENT_ID: "TU_CLIENT_ID_AQUI.apps.googleusercontent.com",
-API_KEY:   "TU_API_KEY_AQUI",
-```
-
-### 3. Subir a GitHub
-
-```bash
-git add index.html
-git commit -m "feat: módulo 3 rotaciones completo"
-git push
-```
-
-La app queda disponible en:  
-`https://sibraweb.github.io/market/rotaciones/`
-
----
-
-## Estructura de archivos en Drive
-
-```
-📁 01_ALYCS/
-   📁 ADCAP/    → VALUACION_YYYY-MM-DD.xlsx (más reciente = tenencia)
-   📁 IEB/
-   📁 BCCCH/
-   📁 BALANZ/
-   📁 IBRK/
-   📁 BINANCE/
-
-📄 Clientes Sheet    → tabla de clientes con perfil y pesos LP/MP/CP/CASH
-📄 Carteras modelo   → pestañas AGRESIVO / MODERADO / CONSERVADOR
-
-📁 04_ROTACIONES_GENERADAS/  → {ALYC}_{fecha} (órdenes del día)
-📁 05_CARTERAS_RESULTANTES/  → {fecha} (posiciones finales del día)
-```
+- `04_ROTACIONES_GENERADAS/` (`CFG.DRIVE.CARPETA_ROTACIONES`) → `{ALYC}_{fecha}`
+  (órdenes del día).
+- `05_CARTERAS_RESULTANTES/` (`CFG.DRIVE.CARPETA_RESULTANTES`) → `{fecha}`
+  (posiciones finales del día).
 
 ## Notas técnicas
 
-- Precios live: [data912.com](https://data912.com) → renta fija se divide /100
-- Tipo de cambio: AL30 / AL30D
-- Cantidades: siempre `floor()` (entero para abajo)
-- % ejecución por fila: botones −5 / +1, default 100%
-- Semáforo verde = saldo ≥ 0, habilita guardar
+- Cantidades: siempre `floor()` (entero para abajo).
+- % ejecución por fila: botones −5 / +1, default 100%.
+- Semáforo verde = saldo ≥ 0, habilita guardar.
+
+## Deploy
+
+La app queda disponible en `https://sibraweb.github.io/market/rotaciones/` —
+alcanza con pushear a `main` (GitHub Pages sirve el repo directo).

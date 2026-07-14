@@ -212,20 +212,15 @@ tr:hover td{background:#0d1117}
 //  CONFIG
 // ══════════════════════════════════════════════════════
 const CFG = {
-  CLIENT_ID: "891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com",
-  SCOPES: "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file openid email profile",
   DRIVE: {
     CARPETA_CLIENTES:    "1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2",
     CARPETA_PAPELES:     "1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI",
     CARPETA_ROTACIONES:  "1ShrZydkIEtROBZ--lObPLdVhidtBebXT",
     CARPETA_RESULTANTES: "1px9T_7kJXX2qnTiLJHIMlThlYaISAN9h",
     CARPETA_PROPUESTAS:  "1u8Sa-7Hi9aAf1oR-YB4bHu97P0zF1FYx",
-    ALYCS: {
-      ADCAP:  "1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2",
-      IEB:    "16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ",
-      BCCH:   "1hKcPBrkb5B889roVRHh3Yx3jXcKPYr9R",
-    },
   },
+  // ALyCs cubiertas por la base sibra-brokers (Sheet TENENCIAS/CAUCIONES.CURRENT).
+  ALYCS_SOPORTADAS: ["ADCAP","IEB","BCCH"],
   DATA912: {
     BASE: "https://data912.com/live",
     PANELES: ["arg_stocks","arg_cedears","arg_bonds","arg_notes","arg_corp"],
@@ -482,7 +477,7 @@ const Datos = {
         caucionPesosFijo:   parseFloat(String(r[13]||"0").replace(/[$,\s]/g,""))||0,
         caucionDolaresFijo: parseFloat(String(r[14]||"0").replace(/[$,\s]/g,""))||0,
       }))
-      .filter(c => c.activo && CFG.DRIVE.ALYCS[c.alyc]);
+      .filter(c => c.activo && CFG.ALYCS_SOPORTADAS.includes(c.alyc));
     console.log("[Clientes]",S.clientes.length,"cargados");
     return S.clientes;
   },

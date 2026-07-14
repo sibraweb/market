@@ -309,7 +309,6 @@ th:hover { background:var(--bg4); }
         <div class="sc-status idle" id="sc-adcap-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
           <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
-          <button class="btn btn-secondary btn-sm" onclick="pickAlycLocal('ADCAP')">↑ Local</button>
         </div>
       </div>
       <div class="source-card" id="sc-ieb">
@@ -318,7 +317,6 @@ th:hover { background:var(--bg4); }
         <div class="sc-status idle" id="sc-ieb-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
           <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
-          <button class="btn btn-secondary btn-sm" onclick="pickAlycLocal('IEB')">↑ Local</button>
         </div>
       </div>
       <div class="source-card" id="sc-bcch">
@@ -862,19 +860,6 @@ async function cargarTodo() {
   log(`✅ Listo. ${posiciones.length} posiciones totales.`,'log-ok');
 }
 
-function pickAlycLocal(alycName) {
-  const input=$('fileInput');
-  input.onchange=async()=>{
-    const file=input.files[0]; if(!file) return;
-    const buf=await file.arrayBuffer();
-    const pos=alycName==='ADCAP'?parseADCAP(buf):parseIEB(buf);
-    posiciones=posiciones.filter(p=>p.alyc!==alycName);
-    posiciones.push(...pos);
-    setStatus(alycName.toLowerCase(),'ok',`${pos.length} posiciones (local)`);
-    actualizarSelectores(); input.value='';
-  };
-  input.click();
-}
 function pickClientesLocal() {
   const input=$('fileInput');
   input.onchange=async()=>{
@@ -911,96 +896,6 @@ function parseClientes(buf) {
 function findCliente(comitente) {
   const norm=normCC(comitente);
   return clientes.find(c=>normCC(c.cc)===norm);
-}
-function parseADCAP(buf) {
-  const wb=XLSX.read(buf,{type:'array'});
-  const sheetName=wb.SheetNames.find(n=>/reporte/i.test(n))||wb.SheetNames[0];
-  const ws=wb.Sheets[sheetName];
-  const rows=XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
-  const pos=[]; let cur=null; let ignorar=false;
-  const IGNORAR=/posici[oó]n informativa|posiciones tomadas|colocadas/i;
-  const CASH_ARS=/^\$\s*-|^pesos/i;
-  const CASH_7000=/dolar\s*7000|usd\s*7000/i;
-  const CASH_MEP=/dolar\s*mep|usd\s*d\s*-|usd\s*d$/i;
-  const CASH_EXT=/dolar\s*cable|dolar\s*(ext|exterior)|usd\s*c\s*-|usd\s*c$/i;
-  rows.forEach(row=>{
-    const c0=String(row[0]??'').trim();
-    if(!c0) return;
-    if(IGNORAR.test(c0)){ignorar=true;cur=null;return;}
-    const esNum=!isNaN(c0)&&c0!=='';
-    if(!esNum&&c0.includes(' / ')&&!c0.includes(' - ')){ignorar=false;cur=null;return;}
-    if(!esNum&&c0.includes(' - ')){
-      if(ignorar) return;
-      if(CASH_ARS.test(c0))  cur='CASH_ARS';
-      else if(CASH_EXT.test(c0)) cur='CASH_USD_EXT';
-      else if(CASH_MEP.test(c0)) cur='CASH_USD_MEP';
-      else if(CASH_7000.test(c0)) cur='CASH_USD_7000';
-      else cur=c0.split(' - ')[0].trim().toUpperCase();
-      return;
-    }
-    if(esNum&&cur&&!ignorar){
-      const t=parseFloat(row[3]);
-      const esCash=cur.startsWith('CASH_');
-      if(isFinite(t)&&(esCash?t!==0:t>0)) pos.push({alyc:'ADCAP',comitente:normCC(c0),ticker:cur,tenencia:t});
-    }
-  });
-  return pos;
-}
-function parseIEB(buf) {
-  const wb=XLSX.read(buf,{type:'array'});
-  const ws=wb.Sheets[wb.SheetNames[0]];
-  const rows=XLSX.utils.sheet_to_json(ws,{defval:'',header:1});
-  const CASH_ARS=new Set(['Pesos','PESOS','$']);
-  const CASH_USD_EXT=new Set(['DOLAR EXT.','DOLAR EXT','DOLAREXT','USD EXT','USD C','USDC','DOLAR CABLE','DÓLARES EXT.']);
-  const CASH_USD=new Set(['USD','DOLARUSA','DÓLAR','DOLAR','USD D','USD MEP','DOLAR MEP','DÓLAR MEP','USDD']);
-  const pos=[];
-  rows.slice(1).forEach(row=>{
-    if(!row) return;
-    const comitente=normCC(row[1]??'');
-    const ticker=String(row[5]??'').trim();
-    const tenencia=parseFloat(row[8]);
-    if(!comitente||!ticker||ticker==='-') return;
-    if(!isFinite(tenencia)||tenencia===0) return;
-    let t=CASH_ARS.has(ticker)?'CASH_ARS':CASH_USD_EXT.has(ticker)?'CASH_USD_EXT':CASH_USD.has(ticker)?'CASH_USD_MEP':ticker.toUpperCase();
-    if(!t.startsWith('CASH_')&&tenencia<0) return;
-    pos.push({alyc:'IEB',comitente,ticker:t,tenencia});
-  });
-  return pos;
-}
-function parseBCCH(buf,comitente) {
-  const pos=[];
-  try {
-    const html=new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/,'');
-    const doc=new DOMParser().parseFromString(html,'text/html');
-    const tables=doc.querySelectorAll('table');
-    if(tables.length<2) return pos;
-    const pn=v=>{const s=String(v||'').trim().replace(/\$/g,'').replace(/\s/g,'').replace(/\./g,'').replace(',','.');const n=parseFloat(s);return isFinite(n)?n:0;};
-    const t1=tables[1];
-    if(t1) t1.querySelectorAll('tr').forEach(row=>{
-      const cells=[...row.querySelectorAll('td,th')].map(c=>c.textContent.trim());
-      const label=(cells[2]||'').toLowerCase();
-      if(label.includes('cuenta corriente pesos')){const imp=pn(cells[cells.length-1]);if(imp!==0)pos.push({alyc:'BCCH',comitente,ticker:'CASH_ARS',tenencia:imp});}
-      if(label.includes('cuenta corriente d')){
-        const m=(cells[3]||'').match(/Cantidad USD[:\s]*([-\d.,]+)/i);
-        if(m){
-          const q=pn(m[1]);
-          const isExt=/ext|exterior|cable/i.test(label);
-          if(q!==0) pos.push({alyc:'BCCH',comitente,ticker:isExt?'CASH_USD_EXT':'CASH_USD_MEP',tenencia:q});
-        }
-      }
-    });
-    for(let t=2;t<=3&&t<tables.length;t++){
-      [...tables[t].querySelectorAll('tr')].slice(1).forEach(row=>{
-        const cells=[...row.querySelectorAll('td,th')].map(c=>c.textContent.trim());
-        const ticker=(cells[1]||'').trim().split(/\s+/)[0].toUpperCase();
-        if(!ticker||/^(ticker|subtotal|total)/i.test(ticker)) return;
-        const tenencia=pn(cells[3]||'');
-        if(!isFinite(tenencia)||tenencia===0) return;
-        pos.push({alyc:'BCCH',comitente,ticker,tenencia});
-      });
-    }
-  } catch(e){console.warn('BCCH',comitente,e);}
-  return pos;
 }
 
 // ═══════════════════════════════════════════
