@@ -300,33 +300,33 @@ th:hover { background:var(--bg4); }
   <div class="drive-panel">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
       <div class="sec-title" style="margin:0;">Fuentes de datos</div>
-      <button class="btn btn-primary" onclick="cargarTodo()">☁ Cargar todo desde Drive</button>
+      <button class="btn btn-primary" onclick="cargarTodo()">☁ Cargar todo</button>
     </div>
     <div class="drive-grid">
       <div class="source-card" id="sc-adcap">
         <div class="sc-title">ADCAP</div>
-        <div class="sc-file" id="sc-adcap-name">Carpeta Drive</div>
+        <div class="sc-file" id="sc-adcap-name">Google Sheets</div>
         <div class="sc-status idle" id="sc-adcap-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarAlycDrive('ADCAP','1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2')">↓ Drive</button>
+          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
           <button class="btn btn-secondary btn-sm" onclick="pickAlycLocal('ADCAP')">↑ Local</button>
         </div>
       </div>
       <div class="source-card" id="sc-ieb">
         <div class="sc-title">IEB</div>
-        <div class="sc-file" id="sc-ieb-name">Carpeta Drive</div>
+        <div class="sc-file" id="sc-ieb-name">Google Sheets</div>
         <div class="sc-status idle" id="sc-ieb-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarAlycDrive('IEB','16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ')">↓ Drive</button>
+          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
           <button class="btn btn-secondary btn-sm" onclick="pickAlycLocal('IEB')">↑ Local</button>
         </div>
       </div>
       <div class="source-card" id="sc-bcch">
         <div class="sc-title">BCCH</div>
-        <div class="sc-file" id="sc-bcch-name">1 archivo/comitente</div>
+        <div class="sc-file" id="sc-bcch-name">Google Sheets</div>
         <div class="sc-status idle" id="sc-bcch-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarBCCH()">↓ Drive</button>
+          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
         </div>
       </div>
       <div class="source-card" id="sc-clientes">
@@ -534,6 +534,7 @@ th:hover { background:var(--bg4); }
 
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
+<script src="../shared/sibra-brokers-data.js"></script>
 <script>
 // ═══════════════════════════════════════════
 //  CONFIG
@@ -712,26 +713,13 @@ async function cargarOperacionesSheets(fresh=false) {
     const rows=data.values||[];
     const hoy=fechaHoy();
 
-    // Check if we need to reset (first row date != today)
-    if(rows.length>0) {
-      const firstDate=rows[0][0]||'';
-      if(firstDate && firstDate!==hoy) {
-        log(`🔄 Datos de otro día (${firstDate}). Limpiando hoja...`,'log-warn');
-        await sheetsClear();
-        SibraCache.invalidate(cacheKey);
-        operHoy=[];
-        log('✅ Hoja limpiada para el nuevo día','log-ok');
-      } else {
-        operHoy=rows.filter(r=>r[0]===hoy).map(r=>({
-          fecha:r[0], hora:r[1], tipo:r[2], alyc:r[3], comitente:r[4],
-          cliente:r[5], ticker:r[6], cantidad:parseFloat(r[7])||0,
-          precioSpot:parseFloat(r[8])||0, montoARS:parseFloat(r[9])||0,
-        }));
-        log(`✅ Operaciones hoy: ${operHoy.length}`,'log-ok');
-      }
-    } else {
-      operHoy=[];
-    }
+    // La hoja acumula historial para siempre; acá solo filtramos lo de hoy.
+    operHoy=rows.filter(r=>r[0]===hoy).map(r=>({
+      fecha:r[0], hora:r[1], tipo:r[2], alyc:r[3], comitente:r[4],
+      cliente:r[5], ticker:r[6], cantidad:parseFloat(r[7])||0,
+      precioSpot:parseFloat(r[8])||0, montoARS:parseFloat(r[9])||0,
+    }));
+    log(`✅ Operaciones hoy: ${operHoy.length}`,'log-ok');
 
     setStatus('operaciones','ok',`${operHoy.length} operaciones hoy`);
     $('kpiOps').textContent=operHoy.length;
@@ -818,55 +806,33 @@ function getPrice(ticker) {
 // ═══════════════════════════════════════════
 //  CARGA DE FUENTES
 // ═══════════════════════════════════════════
-async function cargarAlycDrive(alycName,folderId) {
+// Tenencias: fuente única SibraBrokers.loadTenencias() (Sheet TENENCIAS.CURRENT,
+// alimentado automáticamente por sibra-brokers-repo). Reemplaza la carga vieja
+// por Excel de Drive por-ALyC — esos archivos ya no se suben a mano.
+async function cargarTenenciasSheet(fresh=false) {
   if(!token){alert('Conectá Drive primero');return;}
-  const key=alycName.toLowerCase();
+  ['adcap','ieb','bcch'].forEach(k=>setStatus(k,'loading','Leyendo Sheet...'));
   try {
-    setStatus(key,'loading','Buscando...');
-    const file=await ultimoArchivo(folderId);
-    $(`sc-${key}-name`).textContent=file.name;
-    setStatus(key,'loading',`Descargando...`);
-    const buf=await driveDownload(file.id);
-    const pos=alycName==='ADCAP'?parseADCAP(buf):parseIEB(buf);
-    posiciones=posiciones.filter(p=>p.alyc!==alycName);
-    posiciones.push(...pos);
-    setStatus(key,'ok',`${pos.length} posiciones`);
-    log(`✅ ${alycName}: ${pos.length} posiciones`,'log-ok');
-    actualizarSelectores();
-    $('kpiPos').textContent=posiciones.length;
-    $('kpiRow').style.display='';
-  } catch(e){ setStatus(key,'error','Error: '+e.message); log(`❌ ${alycName}: ${e.message}`,'log-err'); }
-}
-
-async function cargarBCCH() {
-  if(!token){alert('Conectá Drive primero');return;}
-  const FOLDER_ID='1hKcPBrkb5B889roVRHh3Yx3jXcKPYr9R';
-  try {
-    setStatus('bcch','loading','Buscando archivos...');
-    const data=await driveGet('files',{
-      q:`'${FOLDER_ID}' in parents and trashed=false and (name contains '.xls' or name contains '.xlsx')`,
-      orderBy:'name',pageSize:'200',fields:'files(id,name)',
+    const filas=await SibraBrokers.loadTenencias({fresh});
+    posiciones=posiciones.filter(p=>!['ADCAP','IEB','BCCH'].includes(p.alyc));
+    posiciones.push(...filas.map(f=>({
+      alyc:f.alyc, comitente:normCC(f.comitente), cliente:f.cliente,
+      ticker:f.ticker, tenencia:f.cantidad,
+    })));
+    ['ADCAP','IEB','BCCH'].forEach(alyc=>{
+      const key=alyc.toLowerCase();
+      const n=posiciones.filter(p=>p.alyc===alyc).length;
+      $(`sc-${key}-name`).textContent='Google Sheets (TENENCIAS.CURRENT)';
+      setStatus(key, n? 'ok':'error', n? `${n} posiciones` : 'Sin posiciones');
     });
-    if(!data.files?.length){setStatus('bcch','error','Carpeta vacía');return;}
-    posiciones=posiciones.filter(p=>p.alyc!=='BCCH');
-    let total=0;
-    for(let i=0;i<data.files.length;i+=10) {
-      await Promise.all(data.files.slice(i,i+10).map(async file=>{
-        try {
-          const buf=await driveDownload(file.id);
-          const comitente=normCC(file.name.replace(/\.xls(x)?$/i,'').trim());
-          posiciones.push(...parseBCCH(buf,comitente));
-          total++;
-        } catch(e){ log(`⚠ BCCH ${file.name}: ${e.message}`,'log-warn'); }
-      }));
-    }
-    $('sc-bcch-name').textContent=`${total} comitentes`;
-    setStatus('bcch','ok',`${total} comitentes`);
-    log(`✅ BCCH: ${total} comitentes`,'log-ok');
+    log(`✅ Tenencias: ${filas.length} posiciones (ADCAP+IEB+BCCH)`,'log-ok');
     actualizarSelectores();
     $('kpiPos').textContent=posiciones.length;
     $('kpiRow').style.display='';
-  } catch(e){ setStatus('bcch','error','Error: '+e.message); log(`❌ BCCH: ${e.message}`,'log-err'); }
+  } catch(e){
+    ['adcap','ieb','bcch'].forEach(k=>setStatus(k,'error','Error: '+e.message));
+    log('❌ Tenencias: '+e.message,'log-err');
+  }
 }
 
 async function cargarClientesDrive() {
@@ -886,11 +852,9 @@ async function cargarClientesDrive() {
 
 async function cargarTodo() {
   $('processLog').innerHTML=''; $('processLog').style.display='block';
-  log('☁ Cargando todo desde Drive...');
+  log('☁ Cargando todo...');
   await Promise.all([
-    cargarAlycDrive('ADCAP','1B8-FaVvgZ-uXYXb073FCNq8SrTmw4oD2'),
-    cargarAlycDrive('IEB','16ed3PZqYeMOgM8jhU_Efgx47RyizTlJQ'),
-    cargarBCCH(),
+    cargarTenenciasSheet(true),
     cargarClientesDrive(),
   ]);
   await fetchPrices();
