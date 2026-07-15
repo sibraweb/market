@@ -766,14 +766,23 @@ const Calc = {
     });
   },
 
-  // Plata real disponible para comprar: lo que se libera de vender + cash
-  // disponible (ARS y USD al MEP) + aportes. NO ajusta nada por caución
-  // real/teórica -- esa comparación es informativa (ver Calc.base) y no
-  // debe obstaculizar la rotación.
-  disponible(ventas, ten, aARS, aUSD){
+  // Plata disponible para comprar: lo que se libera de vender + cash
+  // disponible (ARS y USD al MEP) + aportes + deltaCaucion. deltaCaucion
+  // (de Calc.base) es el margen entre lo que el % de apalancamiento
+  // permite y lo que ya está tomado de caución real:
+  //  - Positivo (caución real por debajo del %): se suma como plata extra
+  //    para comprar -- si el % está en la tabla, es el margen que ya
+  //    tenías; si el operador lo subió a mano, es la decisión consciente
+  //    de tomar más caución para esta rotación.
+  //  - Negativo (caución real por ENCIMA del %): resta del disponible.
+  //    Nada bloquea per se -- el operador puede subir el % a mano (mismo
+  //    campo que muestra el semáforo EN REGLA/SOBRE-APALANCADA) para
+  //    reconocer ese nivel y liberar el disponible correspondiente. No es
+  //    automático: solo se mueve cuando el operador toca el campo.
+  disponible(ventas, ten, aARS, aUSD, deltaCaucion){
     const tc=S.tipoCambio||0;
     const cashTotal=ten.cashPesos+(ten.cashUSD||0)*tc;
-    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+cashTotal+aARS+(aUSD*tc);
+    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+cashTotal+aARS+(aUSD*tc)+(deltaCaucion||0);
   },
 
   compras(ten, ventas, obj, base, pctC, comC, gasC){
@@ -876,7 +885,7 @@ const App = {
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual.palanca||0);
     const {totalCartera,totalAjustado,base,caucionReal,caucionTeorica,deltaCaucion}=Calc.base(S.tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(S.tenencia,S.objetivo,base,S.pctV,S.comV,S.gasV);
-    const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD);
+    const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
     const compras=Calc.compras(S.tenencia,ventas,S.objetivo,base,S.pctC,S.comC,S.gasC);
     const {nec,saldo,ok}=Calc.saldo(disp,compras);
     UI.renderInicial(ventas,totalCartera,totalAjustado,base,disp,palanca);
@@ -887,9 +896,9 @@ const App = {
     const {clienteActual:cl,alycSel:alyc,tenencia,objetivo}=S;
     if(!cl||!tenencia) return;
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
-    const {base}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
+    const {base,deltaCaucion}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,objetivo,base,S.pctV,S.comV,S.gasV);
-    const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD);
+    const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
     const compras=Calc.compras(tenencia,ventas,objetivo,base,S.pctC,S.comC,S.gasC);
     const {ok}=Calc.saldo(disp,compras);
     if(!ok){ toast("Saldo insuficiente","error"); return; }
@@ -1147,8 +1156,8 @@ const UI = {
         </div>
         ${(deltaCaucion||0)!==0?`<div class="warn-box" style="${sobreApalancada?'':'border-color:var(--blue);color:var(--blue)'}">
           ${sobreApalancada
-            ? `⚠ Caución tomada por ENCIMA del ${pct(palanca)} acordado. No bloquea la rotación — pero como regla de seguridad, si el nivel actual es aceptado a conciencia (cliente retiró todo, o la mesa decide no devolver), subí el % de apalancamiento de arriba hasta que quede "EN REGLA" — así queda registrado que se revisó, en vez de dejarlo en rojo por descuido.`
-            : `ℹ Caución tomada por DEBAJO del ${pct(palanca)} acordado (${fmt(deltaCaucion)} de margen). No afecta el cálculo — se puede aumentar antes de operar, si se decide.`}
+            ? `⚠ Caución tomada por ENCIMA del ${pct(palanca)} acordado — esto resta ${fmt(Math.abs(deltaCaucion))} del disponible para comprar. Si el nivel actual se acepta a conciencia (cliente retiró todo, o la mesa decide no devolver), subí el % de apalancamiento de arriba hasta que quede "EN REGLA": eso libera ese disponible y deja registrado que se revisó, en vez de perderlo por descuido.`
+            : `ℹ Caución tomada por DEBAJO del ${pct(palanca)} acordado — hay ${fmt(deltaCaucion)} de margen ya sumado al disponible. Si se decide tomar menos de lo que el % permite, bajá el % de apalancamiento de arriba para no ofrecer ese margen de más.`}
         </div>`:""}
         <div class="tbl-wrap">
           <table><thead><tr><th>Ticker</th><th>% Obj</th><th>Cant. Obj.</th><th>PU</th><th>Valor ARS</th></tr></thead>
@@ -1169,7 +1178,7 @@ const UI = {
             <div class="sem-value">${fmt(Math.abs(saldo))}</div>
           </div>
         </div>
-        ${!ok?`<div class="warn-box">⚠ Falta cash real: subí el % de venta (izquierda) o bajá el % de ejecución de compras. El % de apalancamiento ya no mueve esto — es solo informativo (ver aviso de caución arriba).</div>`:""}
+        ${!ok?`<div class="warn-box">⚠ Subí el % de apalancamiento (arriba) para reconocer más caución y liberar disponible, subí el % de venta, o bajá el % de ejecución de compras.</div>`:""}
         <div class="tbl-wrap" style="margin-bottom:12px">
           <table><thead><tr><th>Ticker</th><th>Post-venta</th><th>Objetivo</th><th>% Ejecutar</th><th>Operar</th><th>PU</th><th>Monto</th><th>Com.</th><th>% Bruta hoy</th><th>% Bruta post-compra</th></tr></thead>
           <tbody>${cF.length===0?`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px">Sin compras sugeridas</td></tr>`:
