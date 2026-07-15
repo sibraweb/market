@@ -1110,11 +1110,15 @@ const UI = {
           <div class="card"><div class="label">Caución real</div><div class="value-sm">${fmt(caucionReal||0)}</div></div>
         </div>
         <div class="card-grid g2" style="margin-top:8px">
-          <div class="card"><div class="label">Caución teórica (${pct(palanca)} de la tabla, editable arriba)</div><div class="value-sm">${fmt(caucionTeorica||0)}</div></div>
+          <div class="card"><div class="label">Caución teórica (${pct(palanca)}, editable arriba)</div><div class="value-sm">${fmt(caucionTeorica||0)}</div></div>
+          <div class="semaforo ${sobreApalancada?"sem-mal":"sem-ok"}">
+            <div class="sem-label">${sobreApalancada?"✗ SOBRE-APALANCADA":"✓ EN REGLA"}</div>
+            <div class="sem-value">${fmt(Math.abs(deltaCaucion||0))}</div>
+          </div>
         </div>
-        ${(deltaCaucion||0)!==0?`<div class="warn-box" style="border-color:var(--blue);color:var(--blue)">
+        ${(deltaCaucion||0)!==0?`<div class="warn-box" style="${sobreApalancada?'':'border-color:var(--blue);color:var(--blue)'}">
           ${sobreApalancada
-            ? `ℹ Caución tomada por ENCIMA del ${pct(palanca)} acordado (${fmt(Math.abs(deltaCaucion))} de más). No bloquea la rotación — si el cliente ya retiró todo, se deja correr; si no, la mesa decide si corresponde devolver.`
+            ? `⚠ Caución tomada por ENCIMA del ${pct(palanca)} acordado. No bloquea la rotación — pero como regla de seguridad, si el nivel actual es aceptado a conciencia (cliente retiró todo, o la mesa decide no devolver), subí el % de apalancamiento de arriba hasta que quede "EN REGLA" — así queda registrado que se revisó, en vez de dejarlo en rojo por descuido.`
             : `ℹ Caución tomada por DEBAJO del ${pct(palanca)} acordado (${fmt(deltaCaucion)} de margen). No afecta el cálculo — se puede aumentar antes de operar, si se decide.`}
         </div>`:""}
         <div class="tbl-wrap">
