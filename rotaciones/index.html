@@ -388,6 +388,26 @@ const Drive = {
     return r.arrayBuffer();
   },
 
+  // Sube un archivo binario (xlsx) a una carpeta de Drive vía multipart upload
+  // (distinto de crearSheet, que crea un Google Sheet nativo -- esto sube el
+  // .xlsx tal cual, tipo el que arma XLSX.write).
+  async subirArchivo(folderId, nombre, arrayBuffer, mimeType){
+    const boundary = '-------sibra' + Date.now();
+    const metadata = JSON.stringify({ name: nombre, parents: [folderId] });
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelim = `\r\n--${boundary}--`;
+    const head = delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + metadata
+               + delimiter + `Content-Type: ${mimeType}\r\n\r\n`;
+    const body = new Blob([head, arrayBuffer, closeDelim]);
+    const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { ...Auth.hdrs(), 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    });
+    if(!r.ok){ const t=await r.text(); throw new Error(`Drive subida ${r.status}: ${t}`); }
+    return r.json();
+  },
+
   async leerValores(sheetId, range){
     const url = `${Drive.SHEETS}/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
     const r = await fetch(url,{headers:Auth.hdrs()});
@@ -1292,7 +1312,7 @@ const Ops = {
 
   cerrarEnviarAlyc(){ $("modal-enviar").style.display = 'none'; },
 
-  confirmarEnviarAlyc(){
+  async confirmarEnviarAlyc(){
     const alyc = $("envAlycSel").value;
     const campoAlyc = Ops.subTab === 'ordenes' ? 'Alyc' : 'ALYC';
     const fuente = Ops.subTab === 'ordenes' ? Ops.rotacionRows : Ops.resultanteRows;
@@ -1304,10 +1324,23 @@ const Ops = {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, alyc.slice(0, 31));
     const nombreArchivo = `${alyc}_${hoy()}_${Ops.subTab}.xlsx`;
-    XLSX.writeFile(wb, nombreArchivo);
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 
     Ops.cerrarEnviarAlyc();
-    toast(`✓ Excel generado: ${nombreArchivo} — adjuntalo a mano en el grupo de ${alyc}`);
+    XLSX.writeFile(wb, nombreArchivo); // descarga local, como antes
+
+    // Además, sube una copia a la misma carpeta de Drive de donde salió el
+    // dato -- 04_ROTACIONES_GENERADAS si es "ordenes", 05_CARTERAS_RESULTANTES
+    // si es "cartera" -- para que quede un registro de lo que se mandó a mesa.
+    try{
+      const folderId = Ops.subTab === 'ordenes' ? CFG.DRIVE.CARPETA_ROTACIONES : CFG.DRIVE.CARPETA_RESULTANTES;
+      await Drive.subirArchivo(folderId, nombreArchivo, buf,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      toast(`✓ ${nombreArchivo} descargado y guardado en Drive — adjuntalo a mano en el grupo de ${alyc}`);
+    }catch(e){
+      toast(`✓ ${nombreArchivo} descargado, pero no se pudo subir a Drive: ${e.message}`, 'error');
+      console.error('[Ops] subirArchivo:', e);
+    }
   },
 };
 
