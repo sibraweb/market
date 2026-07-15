@@ -730,7 +730,7 @@ async function cargarOperacionesSheets(fresh=false) {
 }
 
 async function registrarOperacion(tipo, alyc, comitente, ticker, cantidad, precioSpot) {
-  const cli=findCliente(comitente);
+  const cli=findCliente(comitente,alyc);
   const cliente=cli?.cliente||comitente;
   const montoARS=cantidad*precioSpot;
   const hoy=fechaHoy();
@@ -893,8 +893,16 @@ function parseClientes(buf) {
     caucionPesos:parseNum(r.caucionPesos||r['Caucion en Pesos']||0),
   })).filter(r=>r.cc);
 }
-function findCliente(comitente) {
+// El número de comitente se repite entre brokers (ver [[project_sibra_brokers]]
+// en memoria / sync_service.py del backend) — si se pasa alyc, matchea por
+// (alyc, cc) primero, para no cruzar el nombre de un cliente con el de otro
+// que comparte número de cuenta en otro broker.
+function findCliente(comitente, alyc) {
   const norm=normCC(comitente);
+  if(alyc){
+    const exact=clientes.find(c=>normCC(c.cc)===norm && c.alyc===alyc);
+    if(exact) return exact;
+  }
   return clientes.find(c=>normCC(c.cc)===norm);
 }
 
@@ -1164,14 +1172,14 @@ function resetEnviadosCompra() { localStorage.removeItem(SENT_KEY_C); renderComp
 //  FORMATO MENSAJE
 // ═══════════════════════════════════════════
 function formatVenta(p,cantidad) {
-  const cli=findCliente(p.comitente);
+  const cli=findCliente(p.comitente,p.alyc);
   const nombre=cli?.cliente||p.comitente;
-  return `CC ${p.comitente} ${nombre}\nOperación Venta\nTítulo ${p.ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\n${fechaLegible()}`;
+  return `ALyC ${p.alyc}\nCC ${p.comitente} ${nombre}\nOperación Venta\nTítulo ${p.ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\n${fechaLegible()}`;
 }
 function formatCompra(alyc,comitente,ticker,cantidad) {
-  const cli=findCliente(comitente);
+  const cli=findCliente(comitente,alyc);
   const nombre=cli?.cliente||comitente;
-  return `CC ${comitente} ${nombre}\nOperación Compra\nTítulo ${ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\n${fechaLegible()}`;
+  return `ALyC ${alyc}\nCC ${comitente} ${nombre}\nOperación Compra\nTítulo ${ticker}\nCantidad ${cantidad} VN\nPrecio de Mercado\nPlazo 24hs\n${fechaLegible()}`;
 }
 function waLink(msg) { return `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(msg)}`; }
 
@@ -1243,7 +1251,7 @@ function renderVentas() {
     <tbody>
     ${filas.map(p=>{
       const key=ventaKey(p,p.ticker);
-      const cli=findCliente(p.comitente);
+      const cli=findCliente(p.comitente,p.alyc);
       const nombre=cli?.cliente||'—';
       const precio=getPrice(p.ticker);
       const cantSug=Math.round(p.stockReal*ventaPct/100);
@@ -1386,7 +1394,7 @@ function renderCompras() {
     <tbody>
     ${filas.map(f=>{
       const key=compraKey(f.alyc,f.comitente);
-      const cli=findCliente(f.comitente);
+      const cli=findCliente(f.comitente,f.alyc);
       const nombre=cli?.cliente||'—';
       const cantSug=Math.floor(f.cantMax*compraPct/100);
       const cant=compraCants[key]?.cant??cantSug;
@@ -1459,7 +1467,7 @@ function renderNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
   let filas=posiciones
     .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}));
+    .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}));
   if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
   else filas=sortRows(filas,'alyc');
   const el=$('negativosBody');
@@ -1486,7 +1494,7 @@ function waNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
   const filas=posiciones
     .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
+    .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}))
     .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
   if(!filas.length){alert('Sin saldos negativos para exportar');return;}
   const titulo=`*Saldos negativos${alycFil?' - '+alycFil:''}*\n`;
@@ -1501,7 +1509,7 @@ function renderExterior() {
   const alycFil=$('extFilterAlyc')?.value||'';
   let filas=posiciones
     .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}));
+    .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}));
   if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
   else filas=sortRows(filas,'alyc');
   const el=$('exteriorBody');
@@ -1528,7 +1536,7 @@ function waExterior() {
   const alycFil=$('extFilterAlyc')?.value||'';
   const filas=posiciones
     .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente)?.cliente||'—'}))
+    .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}))
     .sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
   if(!filas.length){alert('Sin dólares exterior/7000 para exportar');return;}
   const titulo=`*Dólares exterior / 7000${alycFil?' - '+alycFil:''}*\n`;
