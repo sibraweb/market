@@ -860,7 +860,7 @@ const App = {
     const compras=Calc.compras(S.tenencia,ventas,S.objetivo,base,S.pctC,S.comC,S.gasC);
     const {nec,saldo,ok}=Calc.saldo(disp,compras);
     UI.renderInicial(ventas,totalCartera,totalAjustado,base,disp,palanca);
-    UI.renderObjetivo(compras,ventas,disp,nec,saldo,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion);
+    UI.renderObjetivo(compras,ventas,disp,nec,saldo,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion,totalCartera);
   },
 
   async guardar(){
@@ -985,16 +985,19 @@ const UI = {
     if(tab==="operaciones") Ops.init();
   },
 
+  // Sin tope superior: permite sobreponderar (>100%) tanto en ventas como en
+  // compras -- el % de ejecución puede superar el delta calculado a
+  // propósito. Sí tiene piso en 0 (no tiene sentido un % negativo).
   pctCtrl(tipo, ticker, val){
     return `<div class="pct-control">
       <button class="pct-btn" onclick="UI.adjPct('${tipo}','${ticker}',-0.05)">−5</button>
-      <input class="input-field pct-input" type="number" min="0" max="100" value="${Math.round(val*100)}"
+      <input class="input-field pct-input" type="number" min="0" value="${Math.round(val*100)}"
         onchange="UI.setPct('${tipo}','${ticker}',Number(this.value)/100)"/>
       <button class="pct-btn" onclick="UI.adjPct('${tipo}','${ticker}',0.01)">+1</button>
     </div>`;
   },
-  adjPct(tipo,t,d){ const m=tipo==="v"?S.pctV:S.pctC; m[t]=Math.min(1,Math.max(0,(m[t]!==undefined?m[t]:1)+d)); App.render(); },
-  setPct(tipo,t,v){ const m=tipo==="v"?S.pctV:S.pctC; m[t]=Math.min(1,Math.max(0,v)); App.render(); },
+  adjPct(tipo,t,d){ const m=tipo==="v"?S.pctV:S.pctC; m[t]=Math.max(0,(m[t]!==undefined?m[t]:1)+d); App.render(); },
+  setPct(tipo,t,v){ const m=tipo==="v"?S.pctV:S.pctC; m[t]=Math.max(0,v); App.render(); },
 
   renderInicial(ventas, totalCartera, totalAjustado, base, disp, palanca){
     const ten=S.tenencia;
@@ -1070,14 +1073,20 @@ const UI = {
           <div class="card" style="border-color:var(--blue)"><div class="label">Disponible neto</div><div class="value" style="font-size:13px;color:var(--blue)">${fmt(disp)}</div></div>
         </div>
         <div class="tbl-wrap" style="margin-bottom:12px">
-          <table><thead><tr><th>Ticker</th><th>Actual</th><th>Objetivo</th><th>% Ejecutar</th><th>Operar</th><th>PU</th><th>Monto</th><th>Comisión</th></tr></thead>
-          <tbody>${vF.length===0?`<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px">Sin ventas sugeridas</td></tr>`:
-            vF.map(v=>`<tr>
+          <table><thead><tr><th>Ticker</th><th>Actual</th><th>Objetivo</th><th>% Ejecutar</th><th>Operar</th><th>PU</th><th>Monto</th><th>Comisión</th><th>% Bruta hoy</th><th>% Bruta post-venta</th></tr></thead>
+          <tbody>${vF.length===0?`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px">Sin ventas sugeridas</td></tr>`:
+            vF.map(v=>{
+              const pctHoy=totalCartera>0?(v.cantActual*v.pu)/totalCartera:0;
+              const cantPost=v.cantActual-v.cantOp;
+              const pctPost=totalCartera>0?(cantPost*v.pu)/totalCartera:0;
+              return `<tr>
               <td>${v.ticker}</td><td>${fmtN(v.cantActual)}</td><td>${fmtN(v.cantObj)}</td>
               <td>${UI.pctCtrl("v",v.ticker,v.pEj)}</td>
               <td style="color:var(--red-light)">${fmtN(v.cantOp)}</td>
               <td>${fmt(v.pu)}</td><td>${fmt(v.monto)}</td>
-              <td style="color:var(--red-light)">−${fmt(v.com)}</td></tr>`).join("")}
+              <td style="color:var(--red-light)">−${fmt(v.com)}</td>
+              <td>${pct(pctHoy)}</td><td style="color:#fbbf24">${pct(pctPost)}</td></tr>`;
+            }).join("")}
           </tbody></table>
         </div>
         <div style="display:flex;justify-content:flex-end">
@@ -1087,7 +1096,7 @@ const UI = {
     </div>`;
   },
 
-  renderObjetivo(compras, ventas, disp, nec, saldo, ok, base, totalAjustado, palanca, caucionReal, caucionTeorica, deltaCaucion){
+  renderObjetivo(compras, ventas, disp, nec, saldo, ok, base, totalAjustado, palanca, caucionReal, caucionTeorica, deltaCaucion, totalCartera){
     const cF=compras.filter(c=>c.esC);
     const sobreApalancada=(deltaCaucion||0)<0;
     $("pane-objetivo").innerHTML=`
@@ -1140,16 +1149,22 @@ const UI = {
             <div class="sem-value">${fmt(Math.abs(saldo))}</div>
           </div>
         </div>
-        ${!ok?`<div class="warn-box">⚠ Subí el apalancamiento o bajá el % de ejecución de compras.</div>`:""}
+        ${!ok?`<div class="warn-box">⚠ Falta cash real: subí el % de venta (izquierda) o bajá el % de ejecución de compras. El % de apalancamiento ya no mueve esto — es solo informativo (ver aviso de caución arriba).</div>`:""}
         <div class="tbl-wrap" style="margin-bottom:12px">
-          <table><thead><tr><th>Ticker</th><th>Post-venta</th><th>Objetivo</th><th>% Ejecutar</th><th>Operar</th><th>PU</th><th>Monto</th><th>Com.</th></tr></thead>
-          <tbody>${cF.length===0?`<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px">Sin compras sugeridas</td></tr>`:
-            cF.map(c=>`<tr>
+          <table><thead><tr><th>Ticker</th><th>Post-venta</th><th>Objetivo</th><th>% Ejecutar</th><th>Operar</th><th>PU</th><th>Monto</th><th>Com.</th><th>% Bruta hoy</th><th>% Bruta post-compra</th></tr></thead>
+          <tbody>${cF.length===0?`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px">Sin compras sugeridas</td></tr>`:
+            cF.map(c=>{
+              const pctHoy=totalCartera>0?(c.post*c.pu)/totalCartera:0;
+              const cantPost=c.post+c.cantOp;
+              const pctPost=totalCartera>0?(cantPost*c.pu)/totalCartera:0;
+              return `<tr>
               <td>${c.ticker}</td><td>${fmtN(c.post)}</td><td>${fmtN(c.cantObj)}</td>
               <td>${UI.pctCtrl("c",c.ticker,c.pEj)}</td>
               <td style="color:var(--green)">${fmtN(c.cantOp)}</td>
               <td>${fmt(c.pu)}</td><td>${fmt(c.monto)}</td>
-              <td style="color:var(--red-light)">−${fmt(c.com)}</td></tr>`).join("")}
+              <td style="color:var(--red-light)">−${fmt(c.com)}</td>
+              <td>${pct(pctHoy)}</td><td style="color:#fbbf24">${pct(pctPost)}</td></tr>`;
+            }).join("")}
           </tbody></table>
         </div>
         <div style="display:flex;gap:10px;justify-content:flex-end">
