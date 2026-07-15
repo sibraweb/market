@@ -700,13 +700,25 @@ const Calc = {
   base(ten, aporteARS, aporteUSD, palanca){
     const tc=S.tipoCambio||0;
     const valPos=ten.posiciones.reduce((s,p)=>s+p.cantidad*p.pu,0);
-    // Total cartera en ARS: pesos + cash USD y caución USD pesificados al MEP
-    // (antes se ignoraban por completo, subestimando el total real).
     const cashTotal=ten.cashPesos+(ten.cashUSD||0)*tc;
-    const caucionTotal=ten.caucionPesos+(ten.caucionUSD||0)*tc;
-    const total=valPos+cashTotal+caucionTotal;
-    const ajustado=total+aporteARS+(aporteUSD*tc);
-    return {totalCartera:total,totalAjustado:ajustado,base:ajustado*(1+(palanca||0))};
+    const caucionReal=ten.caucionPesos+(ten.caucionUSD||0)*tc;
+    // "Total cartera" (bruta, informativo): incluye la caución real tomada,
+    // para que se vea la deuda real existente.
+    const totalCartera=valPos+cashTotal+caucionReal;
+    // Base de cálculo del TAMAÑO objetivo: NO suma la caución real -- el
+    // apalancamiento permitido ya lo representa (1+palanca) más abajo.
+    // Sumar la caución real de vuelta duplicaba el apalancamiento (ver
+    // memoria project_sibra_brokers). caucionTeorica = cuánta caución
+    // correspondería según el % de la tabla de clientes (o el override
+    // manual del análisis); deltaCaucion = cuánto falta tomar (positivo) o
+    // hay que bajar (negativo) para quedar exactamente en ese %.
+    const palancaN=palanca||0;
+    const ajustado=(valPos+cashTotal)+aporteARS+(aporteUSD*tc);
+    const caucionTeorica=ajustado*palancaN;
+    return {
+      totalCartera, totalAjustado:ajustado, base:ajustado*(1+palancaN),
+      caucionReal, caucionTeorica, deltaCaucion:caucionTeorica-caucionReal,
+    };
   },
 
   ventas(ten, obj, base, pctV, comV, gasV){
@@ -726,10 +738,15 @@ const Calc = {
     });
   },
 
-  disponible(ventas, ten, aARS, aUSD, totalAjustado, palanca){
+  // deltaCaucion (de Calc.base): positivo = margen de caución sin usar, se
+  // suma como plata extra para comprar. Negativo = ya está tomada más
+  // caución de la que el % permite -- resta del disponible, empujando a
+  // vender más o achicar compras hasta bajarla (no hay piso en 0: el
+  // negativo es la señal de "hay que devolver caución").
+  disponible(ventas, ten, aARS, aUSD, deltaCaucion){
     const tc=S.tipoCambio||0;
-    const prestamo=(totalAjustado||0)*(palanca||0);
-    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+ten.cashPesos+aARS+(aUSD*tc)+prestamo;
+    const cashTotal=ten.cashPesos+(ten.cashUSD||0)*tc;
+    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+cashTotal+aARS+(aUSD*tc)+(deltaCaucion||0);
   },
 
   compras(ten, ventas, obj, base, pctC, comC, gasC){
@@ -830,22 +847,22 @@ const App = {
   render(){
     if(!S.clienteActual||!S.tenencia) return;
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual.palanca||0);
-    const {totalCartera,totalAjustado,base}=Calc.base(S.tenencia,S.aporteARS,S.aporteUSD,palanca);
+    const {totalCartera,totalAjustado,base,caucionReal,caucionTeorica,deltaCaucion}=Calc.base(S.tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(S.tenencia,S.objetivo,base,S.pctV,S.comV,S.gasV);
-    const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,totalAjustado,palanca);
+    const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
     const compras=Calc.compras(S.tenencia,ventas,S.objetivo,base,S.pctC,S.comC,S.gasC);
     const {nec,saldo,ok}=Calc.saldo(disp,compras);
     UI.renderInicial(ventas,totalCartera,totalAjustado,base,disp,palanca);
-    UI.renderObjetivo(compras,ventas,disp,nec,saldo,ok,base,totalAjustado,palanca);
+    UI.renderObjetivo(compras,ventas,disp,nec,saldo,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion);
   },
 
   async guardar(){
     const {clienteActual:cl,alycSel:alyc,tenencia,objetivo}=S;
     if(!cl||!tenencia) return;
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
-    const {base,totalAjustado}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
+    const {base,deltaCaucion}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,objetivo,base,S.pctV,S.comV,S.gasV);
-    const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD,totalAjustado,palanca);
+    const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
     const compras=Calc.compras(tenencia,ventas,objetivo,base,S.pctC,S.comC,S.gasC);
     const {ok}=Calc.saldo(disp,compras);
     if(!ok){ toast("Saldo insuficiente","error"); return; }
@@ -1063,8 +1080,9 @@ const UI = {
     </div>`;
   },
 
-  renderObjetivo(compras, ventas, disp, nec, saldo, ok, base, totalAjustado, palanca){
+  renderObjetivo(compras, ventas, disp, nec, saldo, ok, base, totalAjustado, palanca, caucionReal, caucionTeorica, deltaCaucion){
     const cF=compras.filter(c=>c.esC);
+    const sobreApalancada=(deltaCaucion||0)<0;
     $("pane-objetivo").innerHTML=`
     <div class="grid2">
       <div>
@@ -1084,6 +1102,18 @@ const UI = {
           <div class="card"><div class="label">Base ajustada</div><div class="value-sm">${fmt(totalAjustado)}</div></div>
           <div class="card"><div class="label">Con apalancamiento</div><div class="value-sm">${fmt(base)}</div></div>
         </div>
+        <div class="card-grid g2" style="margin-top:8px">
+          <div class="card"><div class="label">Caución real</div><div class="value-sm">${fmt(caucionReal||0)}</div></div>
+          <div class="card" style="${sobreApalancada?'border-color:var(--red)':''}">
+            <div class="label">Caución teórica (${pct(palanca)})</div>
+            <div class="value-sm" style="${sobreApalancada?'color:var(--red-light)':''}">${fmt(caucionTeorica||0)}</div>
+          </div>
+        </div>
+        ${(deltaCaucion||0)!==0?`<div class="warn-box" style="${sobreApalancada?'':'border-color:var(--blue);color:var(--blue)'}">
+          ${sobreApalancada
+            ? `⚠ Sobre-apalancada: hay que BAJAR la caución ${fmt(Math.abs(deltaCaucion))} para quedar en el ${pct(palanca)} permitido.`
+            : `ℹ Margen sin usar: se puede SUBIR la caución hasta ${fmt(deltaCaucion)} más, si hace falta para las compras.`}
+        </div>`:""}
         <div class="tbl-wrap">
           <table><thead><tr><th>Ticker</th><th>% Obj</th><th>Cant. Obj.</th><th>PU</th><th>Valor ARS</th></tr></thead>
           <tbody>${Object.entries(S.objetivo).map(([t,p])=>{
