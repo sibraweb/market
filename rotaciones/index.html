@@ -640,7 +640,7 @@ const Datos = {
       // brokers (ver [[project_sibra_brokers]] en memoria) -- indexar solo
       // por cc cruzaria la tenencia de un cliente con la de otro que
       // comparte numero de cuenta en otro broker.
-      porCliente[`${cl.alyc}|${normCC(cl.cc)}`]={cashPesos, cashUSD, caucionPesos:c.ars, posiciones:pos};
+      porCliente[`${cl.alyc}|${normCC(cl.cc)}`]={cashPesos, cashUSD, caucionPesos:c.ars, caucionUSD:c.usd, posiciones:pos};
     }
     return porCliente;
   },
@@ -680,12 +680,12 @@ const Datos = {
       if(p) pos.push(p);
     }
     const byAcc=cauc.caucionByAccount();
-    let caucionPesos=0;
+    let caucionPesos=0, caucionUSD=0;
     for(const key in byAcc){
       const [b,acc]=key.split('|');
-      if(b===alyc && normCC(acc)===ccNorm){ caucionPesos=byAcc[key].ars; break; }
+      if(b===alyc && normCC(acc)===ccNorm){ caucionPesos=byAcc[key].ars; caucionUSD=byAcc[key].usd; break; }
     }
-    return {cashPesos, cashUSD, caucionPesos, posiciones:pos};
+    return {cashPesos, cashUSD, caucionPesos, caucionUSD, posiciones:pos};
   },
 };
 
@@ -700,7 +700,11 @@ const Calc = {
   base(ten, aporteARS, aporteUSD, palanca){
     const tc=S.tipoCambio||0;
     const valPos=ten.posiciones.reduce((s,p)=>s+p.cantidad*p.pu,0);
-    const total=valPos+ten.cashPesos+ten.caucionPesos;
+    // Total cartera en ARS: pesos + cash USD y caución USD pesificados al MEP
+    // (antes se ignoraban por completo, subestimando el total real).
+    const cashTotal=ten.cashPesos+(ten.cashUSD||0)*tc;
+    const caucionTotal=ten.caucionPesos+(ten.caucionUSD||0)*tc;
+    const total=valPos+cashTotal+caucionTotal;
     const ajustado=total+aporteARS+(aporteUSD*tc);
     return {totalCartera:total,totalAjustado:ajustado,base:ajustado*(1+(palanca||0))};
   },
@@ -1006,8 +1010,10 @@ const UI = {
         })()}
         <div class="card-grid g3">
           <div class="card"><div class="label">Total cartera</div><div class="value" style="font-size:13px">${fmt(totalCartera)}</div></div>
-          <div class="card"><div class="label">Cash pesos</div><div class="value-sm">${fmt(ten.cashPesos)}</div></div>
-          <div class="card"><div class="label">Caución tomadora</div><div class="value-sm">${fmt(ten.caucionPesos)}</div></div>
+          <div class="card"><div class="label">Cash pesos + USD al MEP</div><div class="value-sm">${fmt(ten.cashPesos+(ten.cashUSD||0)*(S.tipoCambio||0))}</div>
+            ${ten.cashUSD?`<div style="font-size:9px;color:var(--text3);margin-top:2px">${fmt(ten.cashPesos)} + U$S ${fmtN(ten.cashUSD)}</div>`:""}</div>
+          <div class="card"><div class="label">Caución tomadora + USD al MEP</div><div class="value-sm">${fmt(ten.caucionPesos+(ten.caucionUSD||0)*(S.tipoCambio||0))}</div>
+            ${ten.caucionUSD?`<div style="font-size:9px;color:var(--text3);margin-top:2px">${fmt(ten.caucionPesos)} + U$S ${fmtN(ten.caucionUSD)}</div>`:""}</div>
         </div>
         <div class="card" style="margin-bottom:8px">
           <div class="label" style="margin-bottom:8px">Flujos de caja</div>
