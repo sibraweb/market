@@ -106,6 +106,12 @@ tr:hover td{background:#0d1117}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 @media(max-width:900px){.grid2{grid-template-columns:1fr}}
 
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200}
+.modal-box{background:var(--bg2);border:1px solid var(--border);padding:24px;width:340px;max-width:92vw}
+.modal-box h3{font-family:'Raleway',sans-serif;font-size:14px;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;color:var(--text2)}
+.hint{font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:14px}
+
 /* Login */
 #login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:24px;background:var(--bg)}
 #login-screen img{height:60px}
@@ -195,12 +201,37 @@ tr:hover td{background:#0d1117}
     <div class="tabs">
       <button class="tab active" id="tab-inicial" onclick="UI.setTab('inicial')">01 · Cartera Inicial</button>
       <button class="tab" id="tab-objetivo" onclick="UI.setTab('objetivo')">02 · Cartera Objetivo</button>
+      <button class="tab" id="tab-operaciones" onclick="UI.setTab('operaciones')">03 · Operaciones</button>
     </div>
   </div>
 
   <div id="content">
     <div id="pane-inicial"></div>
     <div id="pane-objetivo" style="display:none"></div>
+    <div id="pane-operaciones" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 24px 0;">
+        <div class="tabs" style="padding:0">
+          <button class="tab active" id="subtab-ordenes" onclick="Ops.setSubTab('ordenes')">Órdenes cargadas</button>
+          <button class="tab" id="subtab-cartera" onclick="Ops.setSubTab('cartera')">Cartera operada</button>
+        </div>
+        <button class="btn btn-red" onclick="Ops.abrirEnviarAlyc()">📤 Enviar a ALyC</button>
+      </div>
+      <div id="ops-ordenes" style="padding:16px 24px"></div>
+      <div id="ops-cartera" style="padding:16px 24px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-enviar" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Enviar a ALyC</h3>
+    <p class="hint">Se arma un Excel con las filas de "<span id="envFuenteLabel">Órdenes cargadas</span>" de la ALyC elegida y se abre WhatsApp para adjuntarlo al grupo de mesa.</p>
+    <label class="label">ALyC</label>
+    <select id="envAlycSel" class="input-field"></select>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="Ops.cerrarEnviarAlyc()">Cancelar</button>
+      <button class="btn btn-red" onclick="Ops.confirmarEnviarAlyc()">Generar y enviar</button>
+    </div>
   </div>
 </div>
 
@@ -236,7 +267,7 @@ const CFG = {
 const S = {
   token: null, usuario: null,
   clientes: [], carteras: {}, propuestas: {}, precios: {}, tipoCambio: null,
-  tenencias: {},   // { cc: { cashPesos, cashUSD, caucionPesos, posiciones } }
+  tenencias: {},   // { "alyc|cc": { cashPesos, cashUSD, caucionPesos, posiciones } }
   alycSel: null, clienteActual: null, tenencia: null, objetivo: {},
   tab: "inicial",
   aporteARS: 0, aporteUSD: 0,
@@ -355,6 +386,13 @@ const Drive = {
       return r2.arrayBuffer();
     }
     return r.arrayBuffer();
+  },
+
+  async leerValores(sheetId, range){
+    const url = `${Drive.SHEETS}/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
+    const r = await fetch(url,{headers:Auth.hdrs()});
+    if(!r.ok){ const t=await r.text(); throw new Error(`Sheets lectura ${r.status}: ${t}`); }
+    return (await r.json()).values||[];
   },
 
   async buscarPorNombre(folderId, nombre){
@@ -598,7 +636,11 @@ const Datos = {
         if(p) pos.push(p);
       }
       const c=caucionDe(cl.alyc,cl.cc);
-      porCliente[cl.cc]={cashPesos, cashUSD, caucionPesos:c.ars, posiciones:pos};
+      // Clave alyc|cc y no cc solo: el numero de comitente se repite entre
+      // brokers (ver [[project_sibra_brokers]] en memoria) -- indexar solo
+      // por cc cruzaria la tenencia de un cliente con la de otro que
+      // comparte numero de cuenta en otro broker.
+      porCliente[`${cl.alyc}|${normCC(cl.cc)}`]={cashPesos, cashUSD, caucionPesos:c.ars, posiciones:pos};
     }
     return porCliente;
   },
@@ -759,9 +801,11 @@ const App = {
     S.aporteARS=0; S.aporteUSD=0; S.palancaAjuste=null;
     S.pctV={}; S.pctC={}; S.tenencia=null;
     S.objetivo=Calc.objetivo(cliente);
-    // Usar caché si ya se cargaron todas las tenencias
-    if(S.tenencias[cliente.cc]){
-      const ten=S.tenencias[cliente.cc];
+    // Usar caché si ya se cargaron todas las tenencias (clave alyc|cc, ver nota
+    // en _agruparTenencias sobre por qué no alcanza con cc solo)
+    const tenKey=`${cliente.alyc}|${normCC(cliente.cc)}`;
+    if(S.tenencias[tenKey]){
+      const ten=S.tenencias[tenKey];
       ten.posiciones=ten.posiciones.map(p=>({...p,pu:Precios.get(p.ticker)||p.pu}));
       S.tenencia=ten;
       UI.setTab("inicial"); App.render();
@@ -771,7 +815,7 @@ const App = {
     try{
       const ten=await Datos.cargarTenencia(cliente.alyc,cliente.cc);
       ten.posiciones=ten.posiciones.map(p=>({...p,pu:Precios.get(p.ticker)||p.pu}));
-      S.tenencias[cliente.cc]=ten;
+      S.tenencias[tenKey]=ten;
       S.tenencia=ten; hideLoad();
       UI.setTab("inicial"); App.render();
     }catch(e){
@@ -906,8 +950,11 @@ const UI = {
     S.tab=tab;
     $("tab-inicial").className="tab"+(tab==="inicial"?" active":"");
     $("tab-objetivo").className="tab"+(tab==="objetivo"?" active":"");
+    $("tab-operaciones").className="tab"+(tab==="operaciones"?" active":"");
     $("pane-inicial").style.display=tab==="inicial"?"block":"none";
     $("pane-objetivo").style.display=tab==="objetivo"?"block":"none";
+    $("pane-operaciones").style.display=tab==="operaciones"?"block":"none";
+    if(tab==="operaciones") Ops.init();
   },
 
   pctCtrl(tipo, ticker, val){
@@ -1070,6 +1117,139 @@ const UI = {
         </div>
       </div>
     </div>`;
+  },
+};
+
+// ══════════════════════════════════════════════════════
+//  OPERACIONES — ver lo ya guardado en Drive (rotaciones + carteras
+//  resultantes) y armar el Excel por ALyC para mandar por WhatsApp.
+// ══════════════════════════════════════════════════════
+const Ops = {
+  subTab: 'ordenes',
+  rotacionesFiles: [], resultantesFiles: [],
+  rotacionSel: null, resultanteSel: null,
+  rotacionRows: [], resultanteRows: [],
+  _inited: false, _selectorOrdenesHtml: '',
+
+  async init(){
+    if(this._inited) return;
+    this._inited = true;
+    showLoad("Leyendo operaciones guardadas...");
+    try{
+      await Promise.all([this.cargarListaRotaciones(), this.cargarListaResultantes()]);
+    }catch(e){ toast("Error cargando operaciones: "+e.message, "error"); console.error(e); }
+    hideLoad();
+  },
+
+  setSubTab(t){
+    this.subTab = t;
+    $("subtab-ordenes").className = "tab" + (t === "ordenes" ? " active" : "");
+    $("subtab-cartera").className = "tab" + (t === "cartera" ? " active" : "");
+    $("ops-ordenes").style.display = t === "ordenes" ? "block" : "none";
+    $("ops-cartera").style.display = t === "cartera" ? "block" : "none";
+  },
+
+  // ── Órdenes cargadas: un Sheet por "{ALYC}_{fecha}" en CARPETA_ROTACIONES ──
+  async cargarListaRotaciones(){
+    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_ROTACIONES);
+    this.rotacionesFiles = archivos.map(f => {
+      const m = f.name.match(/^(.+)_(\d{4}-\d{2}-\d{2})$/);
+      return { id: f.id, name: f.name, alyc: m ? m[1] : f.name, fecha: m ? m[2] : '' };
+    }).sort((a, b) => b.fecha.localeCompare(a.fecha) || a.alyc.localeCompare(b.alyc));
+    if(this.rotacionesFiles.length) await this.verRotacion(this.rotacionesFiles[0].id);
+    else $("ops-ordenes").innerHTML = '<p class="hint">No hay rotaciones guardadas todavía.</p>';
+  },
+
+  async verRotacion(fileId){
+    this.rotacionSel = fileId;
+    const values = await Drive.leerValores(fileId, 'A1:O2000');
+    const headers = values[0] || [];
+    this.rotacionRows = values.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ''])));
+    this.renderTablaOrdenes();
+  },
+
+  renderTablaOrdenes(){
+    const opts = this.rotacionesFiles.map(f =>
+      `<option value="${f.id}" ${f.id === this.rotacionSel ? 'selected' : ''}>${f.fecha} · ${f.alyc}</option>`).join('');
+    const selector = this.rotacionesFiles.length
+      ? `<div style="margin-bottom:12px"><select class="input-field" style="max-width:260px" onchange="Ops.verRotacion(this.value)">${opts}</select></div>` : '';
+    const head = ["ID","Fecha","Solicita","Operador","Alyc","Comitente","Cuenta Rofex","Operación","Especie","Plazo","Cantidad","Precio","Moneda","Monto Bruto","Observaciones"];
+    const rows = this.rotacionRows;
+    const tabla = rows.length
+      ? `<div style="overflow-x:auto"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${rows.map(r => `<tr>${head.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('')}
+        </tbody></table></div>`
+      : '<p class="hint">Sin filas en esta rotación.</p>';
+    $("ops-ordenes").innerHTML = selector + tabla;
+  },
+
+  // ── Cartera operada: un Sheet por fecha (todas las ALyC juntas) en CARPETA_RESULTANTES ──
+  async cargarListaResultantes(){
+    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_RESULTANTES);
+    this.resultantesFiles = archivos.filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f.name))
+      .sort((a, b) => b.name.localeCompare(a.name));
+    if(this.resultantesFiles.length) await this.verResultante(this.resultantesFiles[0].id);
+    else $("ops-cartera").innerHTML = '<p class="hint">No hay carteras operadas guardadas todavía.</p>';
+  },
+
+  async verResultante(fileId){
+    this.resultanteSel = fileId;
+    const values = await Drive.leerValores(fileId, 'A1:F5000');
+    const headers = values[0] || [];
+    this.resultanteRows = values.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ''])));
+    this.renderTablaCartera();
+  },
+
+  renderTablaCartera(){
+    const opts = this.resultantesFiles.map(f =>
+      `<option value="${f.id}" ${f.id === this.resultanteSel ? 'selected' : ''}>${f.name}</option>`).join('');
+    const selector = this.resultantesFiles.length
+      ? `<div style="margin-bottom:12px"><select class="input-field" style="max-width:180px" onchange="Ops.verResultante(this.value)">${opts}</select></div>` : '';
+    const head = ["FECHA","ALYC","CC","TITULAR","TICKER","CANTIDAD"];
+    const rows = this.resultanteRows;
+    const tabla = rows.length
+      ? `<div style="overflow-x:auto"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${rows.map(r => `<tr>${head.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('')}
+        </tbody></table></div>`
+      : '<p class="hint">Sin filas en esta cartera.</p>';
+    $("ops-cartera").innerHTML = selector + tabla;
+  },
+
+  // ── Enviar a ALyC: arma un Excel con las filas de esa ALyC (de la sub-pestaña
+  //    activa) y lo descarga. El envío 100% automático con adjunto a WhatsApp
+  //    todavía no está conectado -- requiere un puente local (ver nota en
+  //    memoria project_whatsapp_sender/project_sibra_brokers: esta página está
+  //    en https, el servicio de WhatsApp corre en http local, y el navegador
+  //    bloquea ese llamado directo por mixed content). Por ahora: se descarga
+  //    el .xlsx listo para adjuntar a mano en el grupo de esa ALyC. ──
+  abrirEnviarAlyc(){
+    const campoAlyc = Ops.subTab === 'ordenes' ? 'Alyc' : 'ALYC';
+    const fuente = Ops.subTab === 'ordenes' ? Ops.rotacionRows : Ops.resultanteRows;
+    const alycsDisponibles = [...new Set(fuente.map(r => r[campoAlyc]).filter(Boolean))].sort();
+    if(!alycsDisponibles.length){ toast('No hay datos cargados para enviar', 'error'); return; }
+    $("envFuenteLabel").textContent = Ops.subTab === 'ordenes' ? 'Órdenes cargadas' : 'Cartera operada';
+    $("envAlycSel").innerHTML = alycsDisponibles.map(a => `<option>${a}</option>`).join('');
+    $("modal-enviar").style.display = 'flex';
+  },
+
+  cerrarEnviarAlyc(){ $("modal-enviar").style.display = 'none'; },
+
+  confirmarEnviarAlyc(){
+    const alyc = $("envAlycSel").value;
+    const campoAlyc = Ops.subTab === 'ordenes' ? 'Alyc' : 'ALYC';
+    const fuente = Ops.subTab === 'ordenes' ? Ops.rotacionRows : Ops.resultanteRows;
+    const filas = fuente.filter(r => r[campoAlyc] === alyc);
+    if(!filas.length){ toast('Sin filas para esa ALyC', 'error'); return; }
+
+    const headers = Object.keys(filas[0]);
+    const ws = XLSX.utils.json_to_sheet(filas, { header: headers });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, alyc.slice(0, 31));
+    const nombreArchivo = `${alyc}_${hoy()}_${Ops.subTab}.xlsx`;
+    XLSX.writeFile(wb, nombreArchivo);
+
+    Ops.cerrarEnviarAlyc();
+    toast(`✓ Excel generado: ${nombreArchivo} — adjuntalo a mano en el grupo de ${alyc}`);
   },
 };
 
