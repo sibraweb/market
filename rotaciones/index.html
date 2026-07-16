@@ -897,6 +897,12 @@ const App = {
     }
   },
 
+  // Ajuste del % de apalancamiento -- se puede mover en cualquier momento para
+  // arreglar el saldo (sube/baja el disponible vía deltaCaucion). setPalanca
+  // fija el valor tipeado; adjPalanca lo nudge con los botones −5/+1.
+  setPalanca(v){ S.palancaAjuste=Math.max(0,v); App.render(); },
+  adjPalanca(d){ const cur=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual?.palanca||0); S.palancaAjuste=Math.max(0,Math.round((cur+d)*100)/100); App.render(); },
+
   render(){
     if(!S.clienteActual||!S.tenencia) return;
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual.palanca||0);
@@ -1157,9 +1163,11 @@ const UI = {
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div><div class="label">% Apalancamiento</div>
               <div style="font-size:9px;color:var(--text3)">Tabla: ${pct(S.clienteActual.palanca||0)}</div></div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <input class="input-field" type="number" step="1" min="0" style="width:70px;text-align:center"
-                value="${Math.round(palanca*100)}" onchange="S.palancaAjuste=Number(this.value)/100;App.render()"/>
+            <div class="pct-control">
+              <button class="pct-btn" onclick="App.adjPalanca(-0.05)">−5</button>
+              <input class="input-field pct-input" type="number" step="1" min="0"
+                value="${Math.round(palanca*100)}" onchange="App.setPalanca(Number(this.value)/100)"/>
+              <button class="pct-btn" onclick="App.adjPalanca(0.01)">+1</button>
               <span style="font-size:10px;color:var(--text3)">%</span>
             </div>
           </div>
