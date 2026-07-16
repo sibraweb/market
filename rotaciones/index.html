@@ -290,7 +290,6 @@ const pct  = n => (n*100).toFixed(2)+"%";
 const fl   = Math.floor;
 const hoy  = () => new Date().toISOString().slice(0,10);
 const uid  = () => Date.now()+Math.floor(Math.random()*999);
-const esRF = t => CFG.RENTA_FIJA.some(p=>t.toUpperCase().startsWith(p));
 const normPct = v => { const s=String(v||"").replace("%",""); const n=parseFloat(s); return isNaN(n)?0:(n>1?n/100:n); };
 const normCC = v => { if (!v && v!==0) return ''; const n=parseFloat(String(v).trim()); return isFinite(n)?String(Math.round(n)):String(v).trim(); };
 
@@ -483,15 +482,25 @@ const Precios = {
         CFG.DATA912.PANELES.map(p => fetch(`${CFG.DATA912.BASE}/${p}`).then(r=>r.json()))
       );
       S.precios = {};
-      for(const res of resultados){
-        if(res.status!=="fulfilled") continue;
+      // Bonos/ON/letras cotizan cada 100 VN -> hay que dividir por 100. NO se
+      // adivina por prefijo del ticker (eso dejaba pasar cualquier especie que
+      // no arrancara con la lista hardcodeada). Se usa el PANEL de data912 del
+      // que vino el precio, que es autoritativo: arg_bonds/arg_notes/arg_corp
+      // son renta fija (÷100), arg_stocks/arg_cedears no. Mismo criterio que
+      // el módulo "actual" (getPrecioUnitario -> raw/100 para RENTA_FIJA/ON).
+      // resultados[i] corresponde a CFG.DATA912.PANELES[i] (allSettled conserva orden).
+      const RF_PANELES = ["arg_bonds","arg_notes","arg_corp"];
+      CFG.DATA912.PANELES.forEach((panel, i) => {
+        const res = resultados[i];
+        if(!res || res.status!=="fulfilled") return;
+        const esRentaFija = RF_PANELES.includes(panel);
         const items = Array.isArray(res.value) ? res.value : [];
         for(const item of items){
           const sym = String(item.symbol||item.ticker||"").trim().toUpperCase();
           const c   = parseFloat(item.c||item.price||item.last||0);
-          if(sym && c>0) S.precios[sym] = esRF(sym) ? c/100 : c;
+          if(sym && c>0) S.precios[sym] = esRentaFija ? c/100 : c;
         }
-      }
+      });
       // MEP = AL30 / AL30D
       const al30=S.precios["AL30"], al30d=S.precios["AL30D"];
       if(al30&&al30d&&al30d>0) S.tipoCambio = al30/al30d;
@@ -623,9 +632,14 @@ const Datos = {
   _filaATenencia(t){
     if(t.esEfectivo) return null;
     if(!(t.cantidad>0)) return null;
+    // Precio unitario de fallback (cuando data912 no tiene el ticker en vivo):
+    // valor/cantidad = market_value_ars/cantidad, que YA viene bien escalado
+    // (÷100 para bonos) y en pesos — más confiable que t.precio (last_price
+    // crudo, que puede venir por cada 100 VN y romper igual que el live viejo).
+    const puBase = (t.valor>0) ? t.valor/t.cantidad : t.precio;
     return {
       ticker: t.ticker, especie: t.tipo||t.ticker, cantidad: t.cantidad,
-      pu: Precios.get(t.ticker)||t.precio, importe: t.valor||(t.cantidad*t.precio),
+      pu: Precios.get(t.ticker)||puBase, importe: t.valor||(t.cantidad*t.precio),
       esFondo: t.tipo==='FCI',
     };
   },
@@ -1093,8 +1107,12 @@ const UI = {
           </div>
         </div>
         <div class="tbl-wrap">
-          <table><thead><tr><th>Ticker</th><th>Cantidad</th><th>PU</th><th>Total ARS</th></tr></thead>
-          <tbody>${ten.posiciones.map(p=>`<tr><td>${p.ticker}${p.esFondo?` <span style="font-size:9px;color:var(--text3)">(FCI)</span>`:""}</td><td>${fmtN(p.cantidad)}</td><td>${fmt(p.pu)}</td><td>${fmt(p.cantidad*p.pu)}</td></tr>`).join("")}</tbody></table>
+          <table><thead><tr><th>Ticker</th><th>Cantidad</th><th>PU</th><th>Total ARS</th><th>% Bruta</th></tr></thead>
+          <tbody>${ten.posiciones.map(p=>{
+            const val=p.cantidad*p.pu;
+            const pctB=totalCartera>0?val/totalCartera:0;
+            return `<tr><td>${p.ticker}${p.esFondo?` <span style="font-size:9px;color:var(--text3)">(FCI)</span>`:""}</td><td>${fmtN(p.cantidad)}</td><td>${fmt(p.pu)}</td><td>${fmt(val)}</td><td>${pct(pctB)}</td></tr>`;
+          }).join("")}</tbody></table>
         </div>
       </div>
       <div>
