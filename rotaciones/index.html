@@ -447,21 +447,31 @@ const Drive = {
   async appendFilas(sheetId, filas){
     if(!filas.length) return;
     const url = `${Drive.SHEETS}/v4/spreadsheets/${sheetId}/values/A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-    await fetch(url,{method:"POST",headers:{...Auth.hdrs(),"Content-Type":"application/json"},body:JSON.stringify({values:filas})});
+    const r = await fetch(url,{method:"POST",headers:{...Auth.hdrs(),"Content-Type":"application/json"},body:JSON.stringify({values:filas})});
+    // Antes no se revisaba r.ok -- si el token vencía a mitad de sesión, esto
+    // fallaba en SILENCIO (fetch no tira excepción por un 401/403, solo por
+    // fallo de red) y guardar() terminaba mostrando "✓ Guardado" sin haber
+    // escrito nada. Ahora tira un error explícito que sí frena guardar().
+    if(!r.ok) throw new Error(`Sheets append ${r.status}: ${await r.text()}`);
   },
 
   async borrarFilasCC(sheetId, cc){
     const url = `${Drive.SHEETS}/v4/spreadsheets/${sheetId}/values/A:F`;
     const r = await fetch(url,{headers:Auth.hdrs()});
-    if(!r.ok) return;
+    // Antes, si esta lectura fallaba (ej. token vencido), se hacía "return"
+    // en silencio -- guardar() seguía de largo y appendFilas agregaba las
+    // filas nuevas SIN borrar las viejas del mismo comitente, duplicando
+    // datos en CARTERAS_RESULTANTES sin ningún aviso. Ahora tira el error.
+    if(!r.ok) throw new Error(`Sheets lectura ${r.status}: ${await r.text()}`);
     const rows = (await r.json()).values||[];
     const idxs = [];
     for(let i=1;i<rows.length;i++) if(String(rows[i][2]||"").trim()===String(cc).trim()) idxs.push(i);
     if(!idxs.length) return;
     const reqs = idxs.reverse().map(i=>({deleteDimension:{range:{sheetId:0,dimension:"ROWS",startIndex:i,endIndex:i+1}}}));
-    await fetch(`${Drive.SHEETS}/v4/spreadsheets/${sheetId}:batchUpdate`,{
+    const r2 = await fetch(`${Drive.SHEETS}/v4/spreadsheets/${sheetId}:batchUpdate`,{
       method:"POST",headers:{...Auth.hdrs(),"Content-Type":"application/json"},body:JSON.stringify({requests:reqs})
     });
+    if(!r2.ok) throw new Error(`Sheets batchUpdate ${r2.status}: ${await r2.text()}`);
   },
 
   leerXlsx(buf){
@@ -918,6 +928,14 @@ const App = {
   async guardar(){
     const {clienteActual:cl,alycSel:alyc,tenencia,objetivo}=S;
     if(!cl||!tenencia) return;
+    // Chequeo proactivo: el login de Google acá es OAuth implícito (token de
+    // ~1h, sin refresh automático -- ver shared/sibra-auth.js). Si ya venció,
+    // frenar ANTES de escribir nada es mejor que descubrirlo a mitad de
+    // guardar (rotación grabada pero resultantes no, por ejemplo).
+    if(!SibraAuth.getToken()){
+      toast("Tu sesión de Google venció (dura ~1h). Reconectate y volvé a guardar.","error");
+      return;
+    }
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
     const {base,deltaCaucion}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,objetivo,base,S.pctV,S.comV,S.gasV);
@@ -948,7 +966,18 @@ const App = {
       toast(`✓ Guardado: ${cl.cliente}`);
       App.siguienteCliente();
     }catch(e){
-      hideLoad(); toast("Error guardando: "+e.message,"error"); console.error(e);
+      hideLoad();
+      // 401/403 acá casi siempre es el token de Google vencido a mitad de
+      // guardado (rotación grabada, resultantes no, por ejemplo) -- avisar
+      // eso puntualmente en vez de un "Error guardando" genérico, y frenar la
+      // sesión local para que el próximo intento pida reconectar de una.
+      if(/\b(401|403)\b/.test(e.message)){
+        SibraAuth.logout();
+        toast("Tu sesión de Google venció a mitad del guardado. Reconectate y REVISÁ en Drive si ya quedó algo grabado antes de reintentar (para no duplicar).","error");
+      } else {
+        toast("Error guardando: "+e.message,"error");
+      }
+      console.error(e);
     }
   },
 
