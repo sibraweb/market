@@ -99,6 +99,25 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
     </div>
     <div class="status" style="margin-top:8px">La comisión incluye el IVA (en la cuenta corriente el IVA no viene separado). "Me corresponde" = comisión × % del mes.</div>
   </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="font-family:'Raleway',sans-serif;letter-spacing:1px;text-transform:uppercase;font-size:12px;color:var(--text2)">
+        ADCAP — comisión estimada por volumen
+      </div>
+      <span class="spacer" style="flex:1"></span>
+      <label class="status">% estimado sobre volumen operado, este mes:</label>
+      <input class="pctInput" id="pctAdcapMes" type="number" min="0" max="100" step="0.01" onchange="setPctAdcapMes(this.value)"/>
+      <span class="status">%</span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Cliente</th><th>Cuenta</th><th>Volumen operado (compra+venta)</th><th>Comisión estimada</th></tr></thead>
+        <tbody id="tbodyAdcap"></tbody>
+      </table>
+    </div>
+    <div class="status" style="margin-top:8px">ADCAP no discrimina su comisión de compra/venta como línea propia en el ledger (queda adentro del neto del trade) — esto es una ESTIMACIÓN sobre el volumen operado, no un dato real capturado.</div>
+  </div>
 </main>
 </div>
 
@@ -169,6 +188,12 @@ function setVista(v){ vista=v; $('btn-alyc').classList.toggle('active',v==='alyc
 function getPctMes(mes){ const v=localStorage.getItem('sibra_com_pct_'+(mes||'ALL')); return v!==null?parseFloat(v):0.5; }
 function setPctMes(v){ const mes=$('mesSel').value; localStorage.setItem('sibra_com_pct_'+(mes||'ALL'),String((parseFloat(v)||0)/100)); render(); }
 
+// % estimado de comisión ADCAP sobre volumen operado, por mes (localStorage).
+// Sin default "razonable" propio -- arranca en 0 hasta que se cargue a mano,
+// para no inventar una tasa de comisión que nadie confirmó.
+function getPctAdcapMes(mes){ const v=localStorage.getItem('sibra_com_pct_adcap_'+(mes||'ALL')); return v!==null?parseFloat(v):0; }
+function setPctAdcapMes(v){ const mes=$('mesSel').value; localStorage.setItem('sibra_com_pct_adcap_'+(mes||'ALL'),String((parseFloat(v)||0)/100)); render(); }
+
 function render(){
   const mes=$('mesSel').value;
   const pct=getPctMes(mes);
@@ -202,6 +227,24 @@ function render(){
     const corr=v.COMISION*pct;
     return `<tr><td>${k}</td>${CATS.map(c=>`<td>${fmt(v[c])}</td>`).join('')}<td>${fmt(totalCostos)}</td><td class="me">${fmt(corr)}</td></tr>`;
   }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Sin datos${mes?' para '+mes:''}</td></tr>`;
+
+  renderAdcap(datos, mes);
+}
+
+function renderAdcap(datos, mes){
+  const pctAdcap=getPctAdcapMes(mes);
+  $('pctAdcapMes').value=pctAdcap*100;
+  // agrupa por (cuenta) -- ADCAP siempre es la misma ALyC acá, lo que varía es la cuenta/cliente
+  const g={};
+  datos.filter(f=>f.categoria==='VOLUMEN_ADCAP').forEach(f=>{
+    const k=f.account||'(sin cuenta)';
+    if(!g[k]) g[k]={cliente:f.client_name||'—', volumen:0};
+    g[k].volumen+=f.monto_ars;
+  });
+  const filas=Object.entries(g).sort((a,b)=>b[1].volumen-a[1].volumen);
+  $('tbodyAdcap').innerHTML=filas.length?filas.map(([cuenta,v])=>
+    `<tr><td>${v.cliente}</td><td>${cuenta}</td><td>${fmt(v.volumen)}</td><td class="me">${fmt(v.volumen*pctAdcap)}</td></tr>`
+  ).join(''):`<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:24px">Sin volumen de ADCAP${mes?' para '+mes:''}</td></tr>`;
 }
 
 restore();
