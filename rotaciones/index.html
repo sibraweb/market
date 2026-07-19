@@ -255,6 +255,12 @@ const CFG = {
   },
   // ALyCs cubiertas por la base sibra-brokers (Sheet TENENCIAS/CAUCIONES.CURRENT).
   ALYCS_SOPORTADAS: ["ADCAP","IEB","BCCH"],
+  // Si la valuación con data912 difiere del valor que informa el propio
+  // broker en más de este % (sobre el total de títulos), se bloquea guardar
+  // la rotación -- pensado para agarrar bugs de precio (ej. el ×100 de
+  // bonos/ON/letras que ya rompió una valuación real) ANTES de mandar
+  // órdenes con precios mal escalados.
+  DISCREPANCIA_MAX_PCT: 0.05,
   DATA912: {
     BASE: "https://data912.com/live",
     PANELES: ["arg_stocks","arg_cedears","arg_bonds","arg_notes","arg_corp"],
@@ -647,11 +653,44 @@ const Datos = {
     // (÷100 para bonos) y en pesos — más confiable que t.precio (last_price
     // crudo, que puede venir por cada 100 VN y romper igual que el live viejo).
     const puBase = (t.valor>0) ? t.valor/t.cantidad : t.precio;
+    const puData912 = Precios.get(t.ticker);
     return {
       ticker: t.ticker, especie: t.tipo||t.ticker, cantidad: t.cantidad,
-      pu: Precios.get(t.ticker)||puBase, importe: t.valor||(t.cantidad*t.precio),
+      pu: puData912||puBase, importe: t.valor||(t.cantidad*t.precio),
       esFondo: t.tipo==='FCI',
+      // Para el control de discrepancia: valor que YA informa el broker
+      // (t.valor = market_value_ars, viene directo de BCCH/ADCAP, no de
+      // data912) vs. lo que da nuestro precio en vivo -- solo si data912
+      // tiene el ticker (si no, no hay con qué comparar y no debe contar
+      // como discrepancia).
+      valorBroker: t.valor||0,
+      valorData912: puData912 ? t.cantidad*puData912 : (t.valor||0),
     };
+  },
+
+  // Discrepancia entre el valor que informa el broker y el que da nuestra
+  // valuación con data912, sobre el total de TÍTULOS de la cuenta (el cash no
+  // se recalcula con precio propio, así que no aporta ni diluye la métrica).
+  // Pensado para agarrar bugs de escala de precio (ej. el ×100 de bonos/ON/
+  // letras que ya nos rompió la valuación una vez) antes de mandar órdenes.
+  _discrepanciaCartera(posiciones){
+    const vB=posiciones.reduce((s,p)=>s+(p.valorBroker||0),0);
+    const vD=posiciones.reduce((s,p)=>s+(p.valorData912||0),0);
+    if(vB<=0) return 0;
+    return Math.abs(vD-vB)/vB;
+  },
+
+  // Al re-entrar a un cliente ya cacheado (o justo después de cargarlo), los
+  // precios de data912 pueden haber cambiado -- hay que refrescar `pu` Y
+  // `valorData912` juntos (antes solo se refrescaba `pu`, y la discrepancia
+  // quedaba calculada con el precio viejo). No muta la tenencia de entrada.
+  _refrescarPrecios(ten){
+    const posiciones=ten.posiciones.map(p=>{
+      const puNuevo=Precios.get(p.ticker)||p.pu;
+      const puData912=Precios.get(p.ticker);
+      return {...p, pu:puNuevo, valorData912: puData912 ? p.cantidad*puData912 : p.valorData912};
+    });
+    return {...ten, posiciones, discrepanciaPct:Datos._discrepanciaCartera(posiciones)};
   },
 
   async _agruparTenencias(fresh=false){
@@ -687,7 +726,8 @@ const Datos = {
       // brokers (ver [[project_sibra_brokers]] en memoria) -- indexar solo
       // por cc cruzaria la tenencia de un cliente con la de otro que
       // comparte numero de cuenta en otro broker.
-      porCliente[`${cl.alyc}|${normCC(cl.cc)}`]={cashPesos, cashUSD, caucionPesos:c.ars, caucionUSD:c.usd, posiciones:pos};
+      porCliente[`${cl.alyc}|${normCC(cl.cc)}`]={cashPesos, cashUSD, caucionPesos:c.ars, caucionUSD:c.usd,
+        posiciones:pos, discrepanciaPct:Datos._discrepanciaCartera(pos)};
     }
     return porCliente;
   },
@@ -732,7 +772,8 @@ const Datos = {
       const [b,acc]=key.split('|');
       if(b===alyc && normCC(acc)===ccNorm){ caucionPesos=byAcc[key].ars; caucionUSD=byAcc[key].usd; break; }
     }
-    return {cashPesos, cashUSD, caucionPesos, caucionUSD, posiciones:pos};
+    return {cashPesos, cashUSD, caucionPesos, caucionUSD, posiciones:pos,
+      discrepanciaPct:Datos._discrepanciaCartera(pos)};
   },
 };
 
@@ -889,16 +930,14 @@ const App = {
     // en _agruparTenencias sobre por qué no alcanza con cc solo)
     const tenKey=`${cliente.alyc}|${normCC(cliente.cc)}`;
     if(S.tenencias[tenKey]){
-      const ten=S.tenencias[tenKey];
-      ten.posiciones=ten.posiciones.map(p=>({...p,pu:Precios.get(p.ticker)||p.pu}));
+      const ten=Datos._refrescarPrecios(S.tenencias[tenKey]);
       S.tenencia=ten;
       UI.setTab("inicial"); App.render();
       return;
     }
     showLoad(`Cargando tenencia de ${cliente.cliente}...`);
     try{
-      const ten=await Datos.cargarTenencia(cliente.alyc,cliente.cc);
-      ten.posiciones=ten.posiciones.map(p=>({...p,pu:Precios.get(p.ticker)||p.pu}));
+      const ten=Datos._refrescarPrecios(await Datos.cargarTenencia(cliente.alyc,cliente.cc));
       S.tenencias[tenKey]=ten;
       S.tenencia=ten; hideLoad();
       UI.setTab("inicial"); App.render();
@@ -920,14 +959,28 @@ const App = {
     const ventas=Calc.ventas(S.tenencia,S.objetivo,base,S.pctV,S.comV,S.gasV);
     const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
     const compras=Calc.compras(S.tenencia,ventas,S.objetivo,base,S.pctC,S.comC,S.gasC);
-    const {nec,saldo,ok}=Calc.saldo(disp,compras);
+    const {nec,saldo,ok:saldoOk}=Calc.saldo(disp,compras);
+    // Control de discrepancia: si nuestra valuación con data912 difiere de la
+    // del broker en más del umbral, hay muy probablemente un bug de precio
+    // (ej. el ×100 de bonos/ON/letras) -- bloquear SIEMPRE, aunque el saldo
+    // diera bien, porque un precio mal escalado también arruina el % Obj.
+    const discrepancia=S.tenencia.discrepanciaPct||0;
+    const discrepanciaOk=discrepancia<=CFG.DISCREPANCIA_MAX_PCT;
+    const ok=saldoOk&&discrepanciaOk;
     UI.renderInicial(ventas,totalCartera,totalAjustado,base,disp,palanca);
-    UI.renderObjetivo(compras,ventas,disp,nec,saldo,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion,totalCartera);
+    UI.renderObjetivo(compras,ventas,disp,nec,saldoOk,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion,totalCartera,discrepancia,discrepanciaOk);
   },
 
   async guardar(){
     const {clienteActual:cl,alycSel:alyc,tenencia,objetivo}=S;
     if(!cl||!tenencia) return;
+    // Defensa en profundidad: re-chequear la discrepancia de precio acá
+    // también, no solo en el botón (que ya queda deshabilitado en render(),
+    // pero por si acaso guardar() se llama de otro lado en el futuro).
+    if((tenencia.discrepanciaPct||0)>CFG.DISCREPANCIA_MAX_PCT){
+      toast(`Bloqueado: la valuación con data912 difiere ${pct(tenencia.discrepanciaPct)} de la del broker (máximo ${pct(CFG.DISCREPANCIA_MAX_PCT)}). Puede haber un precio mal escalado -- revisá antes de operar.`,"error");
+      return;
+    }
     // Chequeo proactivo: el login de Google acá es OAuth implícito (token de
     // ~1h, sin refresh automático -- ver shared/sibra-auth.js). Si ya venció,
     // frenar ANTES de escribir nada es mejor que descubrirlo a mitad de
@@ -1181,13 +1234,19 @@ const UI = {
     </div>`;
   },
 
-  renderObjetivo(compras, ventas, disp, nec, saldo, ok, base, totalAjustado, palanca, caucionReal, caucionTeorica, deltaCaucion, totalCartera){
+  renderObjetivo(compras, ventas, disp, nec, saldo, ok, base, totalAjustado, palanca, caucionReal, caucionTeorica, deltaCaucion, totalCartera, discrepancia, discrepanciaOk){
     const cF=compras.filter(c=>c.esC);
     const sobreApalancada=(deltaCaucion||0)<0;
     $("pane-objetivo").innerHTML=`
     <div class="grid2">
       <div>
         <div class="section-title">Cartera objetivo · ${S.clienteActual.perfil}</div>
+        ${!discrepanciaOk?`<div class="warn-box">
+          ⛔ BLOQUEADO: la valuación con data912 difiere ${pct(discrepancia)} del valor que informa el broker
+          (máximo permitido ${pct(CFG.DISCREPANCIA_MAX_PCT)}). Probablemente hay un precio mal escalado
+          (ej. un bono/ON/letra sin dividir por 100) — revisá los precios en "Cartera Inicial" antes de operar.
+          No se puede guardar la rotación hasta que esto baje del umbral.
+        </div>`:""}
         <div class="card" style="margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div><div class="label">% Apalancamiento</div>
@@ -1257,7 +1316,7 @@ const UI = {
         <div style="display:flex;gap:10px;justify-content:flex-end">
           <button class="btn btn-ghost" onclick="App.pasarSinOperar()">Pasar sin operar →</button>
           <button class="btn ${ok?"btn-green":"btn-ghost"}" ${ok?"":"disabled"} onclick="App.guardar()">
-            ${ok?"✓ Guardar Rotación":"✗ Saldo insuficiente"}
+            ${ok?"✓ Guardar Rotación":(!discrepanciaOk?"⛔ Precio bloqueado":"✗ Saldo insuficiente")}
           </button>
         </div>
       </div>
