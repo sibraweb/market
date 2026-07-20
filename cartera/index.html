@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIBRA · Cartera</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Raleway:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --red:#E10600;--red-light:#ff3330;--red-dark:#B00500;
+  --bg:#0d0d0d;--bg2:#141414;--bg3:#1a1a1a;--border:#2a2a2a;--border2:#3a3a3a;
+  --text:#f5f5f5;--text2:#b8b8b8;--text3:#888;--green:#22c55e;--amber:#fbbf24;--blue:#60a5fa;
+  --font-main:'Montserrat',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font-main);font-size:13px}
+a{color:inherit;text-decoration:none}
+.app-header{background:#0b0b0b;border-bottom:2px solid var(--red);padding:12px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+.app-header h1{font-family:'Raleway',sans-serif;font-size:15px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);font-weight:600}
+.back-btn{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:5px 12px;border-radius:4px;font-size:11px;display:flex;align-items:center;gap:5px;transition:all .2s}
+.back-btn:hover{border-color:var(--red);color:var(--red-light)}
+.spacer{flex:1}
+main{padding:20px 24px;max-width:1700px;margin:0 auto}
+.btn{padding:7px 16px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;font-family:var(--font-main);font-size:11px;letter-spacing:1px;text-transform:uppercase;border-radius:4px;transition:all .2s}
+.btn:hover{border-color:var(--red);color:var(--text)}
+.btn-primary{background:var(--red);border-color:var(--red);color:#fff}
+.btn-primary:hover{background:var(--red-dark);color:#fff}
+.btn.active{border-color:var(--red);color:var(--red-light)}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.toolbar label{font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+select,input{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 10px;font-family:var(--font-main);font-size:12px;border-radius:4px;outline:none}
+select:focus,input:focus{border-color:var(--red)}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:16px}
+.card-title{font-family:'Raleway',sans-serif;letter-spacing:1px;text-transform:uppercase;font-size:12px;color:var(--text2);margin-bottom:10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px}
+.kpi .lbl{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:4px}
+.kpi .val{font-size:17px;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+th,td{padding:7px 9px;border-bottom:1px solid var(--border);text-align:right}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{color:var(--text3);font-size:9px;letter-spacing:.5px;text-transform:uppercase;font-weight:600;background:#0f0f0f;position:sticky;top:0}
+tbody tr:hover{background:rgba(255,255,255,.03)}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:6px;max-height:60vh;overflow-y:auto}
+.pos{color:var(--green);font-weight:600}
+.neg{color:var(--red-light);font-weight:600}
+.status{font-size:11px;color:var(--text3)}
+.login{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px}
+.login h2{font-family:'Raleway',sans-serif;font-size:20px;letter-spacing:2px;text-transform:uppercase;color:var(--text2)}
+.login p{color:var(--text3);max-width:420px;line-height:1.6}
+.hidden{display:none}
+.warn{background:#1c0a0a;border:1px solid #7f1d1d;color:var(--red-light);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:16px;line-height:1.5}
+.muted{color:var(--text3)}
+</style>
+</head>
+<body>
+
+<div id="login" class="login">
+  <h2>SIBRA · Cartera</h2>
+  <p>Posiciones abiertas con PPC, días de tenencia, resultado total (precio + rentas) y TIR — y el realizado por mes. Sale del FIFO del backend (BCCH + IEB). Conectate con Google para leer la base.</p>
+  <button class="btn btn-primary" onclick="driveAuth()">Conectar con Google</button>
+  <div id="loginErr" class="status"></div>
+</div>
+
+<div id="app" class="hidden">
+<header class="app-header">
+  <a href="../" class="back-btn">← Market Suite</a>
+  <h1>Cartera · FIFO</h1>
+  <div class="spacer"></div>
+  <span id="updatedAt" class="status"></span>
+  <button class="btn" onclick="cargar(true)">↻ Actualizar</button>
+</header>
+<main>
+  <div id="setupWarn" class="warn hidden"></div>
+  <div class="toolbar">
+    <label>ALyC</label><select id="alycSel" onchange="render()"></select>
+    <label>Cliente</label><select id="clienteSel" onchange="render()"></select>
+    <label>Moneda</label>
+    <button class="btn active" id="btn-ars" onclick="setMoneda('ars')">ARS</button>
+    <button class="btn" id="btn-usd" onclick="setMoneda('usd')">USD (MEP)</button>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card">
+    <div class="card-title">Posiciones abiertas <span class="muted">· revaluadas a mercado (data912)</span></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr id="theadPos"></tr></thead>
+      <tbody id="tbodyPos"></tbody>
+    </table></div>
+    <div class="status" style="margin-top:8px">
+      PPC y resultados en ARS (o USD al MEP de cada fecha). DPT = días promedio de tenencia ponderado por cantidad.
+      Total = precio + rentas/dividendos cobrados por los lotes abiertos. TIR = XIRR con la fecha real de cada flujo, del plazo y anualizada.
+      ADCAP no entra al FIFO (su ledger no trae cantidades reales).
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Resultado realizado por mes <span class="muted">· ventas casadas FIFO</span></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Mes</th><th>Resultado precio</th><th>Rentas de lo vendido</th><th>Resultado total</th><th># Ventas</th></tr></thead>
+      <tbody id="tbodyMes"></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Rentas y dividendos cobrados por mes <span class="muted">· todos, tenencia abierta o no</span></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Mes</th><th>Monto cobrado</th><th># Pagos</th></tr></thead>
+      <tbody id="tbodyRentas"></tbody>
+    </table></div>
+  </div>
+</main>
+</div>
+
+<script src="../shared/sibra-auth.js"></script>
+<script src="../shared/sibra-cache.js"></script>
+<script>
+// ═══════════════════════════════════════════
+//  CONFIG — hoja SIBRA_BROKERS_OPERACIONES (la escribe el backend:
+//  historicos.rebuild() + fifo.rebuild(), tabs REVALUACION /
+//  REALIZADO_MENSUAL / RENTAS, automático en el ciclo horario).
+// ═══════════════════════════════════════════
+const OPERACIONES_SHEET_ID = '1hjo-ESxQA4yX-MHE7NQ3ipLpvhrGIVXC_fN3TotNmIw';
+
+let token=null, posiciones=[], mensuales=[], rentas=[], moneda='ars';
+const $=id=>document.getElementById(id);
+const fmt=n=>isFinite(n)?'$'+Math.round(n).toLocaleString('es-AR'):'—';
+const fmtU=n=>isFinite(n)?'U$D '+n.toLocaleString('es-AR',{maximumFractionDigits:0}):'—';
+const fmtQ=n=>isFinite(n)?n.toLocaleString('es-AR',{maximumFractionDigits:2}):'—';
+const fmtP=(n,d=6)=>isFinite(n)?n.toLocaleString('es-AR',{maximumFractionDigits:d}):'—';
+const pct=n=>isFinite(n)?n.toFixed(1)+'%':'—';
+const cls=n=>!isFinite(n)?'':n>=0?'pos':'neg';
+const num=v=>{const f=parseFloat(v);return isFinite(f)?f:NaN;};
+
+function driveAuth(){
+  SibraAuth.connect().then(t=>{token=t;showApp();cargar();})
+    .catch(e=>$('loginErr').textContent='Error: '+e.message);
+}
+function restore(){ const t=SibraAuth.getToken(); if(t){token=t;showApp();cargar();} }
+function showApp(){ $('login').classList.add('hidden'); $('app').classList.remove('hidden'); }
+
+async function sheetGet(range,fresh){
+  const key=`cart_${OPERACIONES_SHEET_ID}_${range}`;
+  if(!fresh){ const c=SibraCache.get(key,120); if(c) return c; }
+  const url=`https://sheets.googleapis.com/v4/spreadsheets/${OPERACIONES_SHEET_ID}/values/${encodeURIComponent(range)}`;
+  const r=await fetch(url,{headers:{Authorization:'Bearer '+token}});
+  if(!r.ok) throw new Error('Sheets '+r.status+': '+await r.text());
+  const d=await r.json(); SibraCache.set(key,d); return d;
+}
+function rowsFromValues(values){
+  if(!values||!values.length) return [];
+  const h=values[0];
+  return values.slice(1).map(row=>Object.fromEntries(h.map((k,i)=>[k,row[i]??''])));
+}
+
+async function cargar(fresh){
+  try{
+    const [rev,men,ren]=await Promise.all([
+      sheetGet('REVALUACION!A:AZ',fresh),
+      sheetGet('REALIZADO_MENSUAL!A:L',fresh),
+      sheetGet('RENTAS!A:J',fresh),
+    ]);
+    posiciones=rowsFromValues(rev.values);
+    mensuales=rowsFromValues(men.values);
+    rentas=rowsFromValues(ren.values);
+    $('setupWarn').classList.add('hidden');
+    const upd=posiciones[0]&&posiciones[0].updated_at;
+    $('updatedAt').textContent=upd?('FIFO al '+upd.replace('T',' ').slice(0,16)):'';
+    poblarFiltros();
+    render();
+  }catch(e){
+    $('setupWarn').classList.remove('hidden');
+    $('setupWarn').textContent='No pude leer la hoja de operaciones: '+e.message;
+  }
+}
+
+function poblarFiltros(){
+  const alycs=[...new Set(posiciones.map(p=>p.broker_code).filter(Boolean))].sort();
+  $('alycSel').innerHTML='<option value="">Todas</option>'+alycs.map(a=>`<option>${a}</option>`).join('');
+  const clientes=[...new Set(posiciones.map(p=>p.client_name).filter(Boolean))].sort();
+  $('clienteSel').innerHTML='<option value="">Todos</option>'+clientes.map(c=>`<option>${c}</option>`).join('');
+}
+
+function setMoneda(m){ moneda=m; $('btn-ars').classList.toggle('active',m==='ars'); $('btn-usd').classList.toggle('active',m==='usd'); render(); }
+
+function filtrar(arr){
+  const alyc=$('alycSel').value, cli=$('clienteSel').value;
+  return arr.filter(r=>(!alyc||r.broker_code===alyc)&&(!cli||r.client_name===cli));
+}
+
+function render(){
+  const usd=moneda==='usd';
+  const pos=filtrar(posiciones);
+  const F=usd?fmtU:fmt;
+
+  // KPIs (en la moneda elegida; USD puede estar incompleto si faltó MEP en algún lote)
+  let valor=0,costo=0,resNR=0,rentasCob=0,resTot=0,incompleto=false;
+  pos.forEach(p=>{
+    const v=num(usd?p.valor_mercado_usd:p.valor_mercado);
+    const c=num(usd?p.costo_total_usd:p.costo_total);
+    const rc=num(usd?p.rentas_cobradas_usd:p.rentas_cobradas);
+    if(isFinite(v)) valor+=v; else incompleto=true;
+    if(isFinite(c)) costo+=c;
+    if(isFinite(rc)) rentasCob+=rc;
+    const r=usd?(v-c):num(p.resultado_no_realizado);
+    if(isFinite(r)) resNR+=r;
+    const rt=usd?(v-c+(isFinite(rc)?rc:0)):num(p.resultado_total_no_realizado);
+    if(isFinite(rt)) resTot+=rt;
+  });
+  $('kpis').innerHTML=`
+    <div class="kpi"><div class="lbl">Valor de mercado</div><div class="val">${F(valor)}</div></div>
+    <div class="kpi"><div class="lbl">Costo FIFO</div><div class="val">${F(costo)}</div></div>
+    <div class="kpi"><div class="lbl">Res. no realizado (precio)</div><div class="val ${cls(resNR)}">${F(resNR)}</div></div>
+    <div class="kpi"><div class="lbl">Rentas cobradas (abiertas)</div><div class="val">${F(rentasCob)}</div></div>
+    <div class="kpi"><div class="lbl">Resultado TOTAL</div><div class="val ${cls(resTot)}">${F(resTot)}</div></div>
+    ${incompleto?'<div class="kpi"><div class="lbl">⚠ USD incompleto</div><div class="val" style="font-size:11px;color:var(--amber)">Faltó MEP/spot en algún lote</div></div>':''}`;
+
+  // Tabla de posiciones
+  $('theadPos').innerHTML=`<th>Cliente</th><th>ALyC · Cuenta</th><th>Ticker</th><th>Cantidad</th>
+    <th>PPC</th><th>Spot</th><th>Valor mercado</th><th>DPT (días)</th>
+    <th>Res. precio</th><th>Rentas cob.</th><th>Res. TOTAL</th><th>Total %</th>
+    <th>TIR plazo</th><th>TIR anual</th>`;
+  const filas=pos.map(p=>{
+    const v=num(usd?p.valor_mercado_usd:p.valor_mercado);
+    return {p, v:isFinite(v)?v:-Infinity};
+  }).sort((a,b)=>b.v-a.v);
+  $('tbodyPos').innerHTML=filas.length?filas.map(({p})=>{
+    const ppc=num(usd?p.ppc_usd:p.ppc), spot=num(usd?p.precio_spot_usd:p.precio_spot);
+    const v=num(usd?p.valor_mercado_usd:p.valor_mercado);
+    const c=num(usd?p.costo_total_usd:p.costo_total);
+    const rc=num(usd?p.rentas_cobradas_usd:p.rentas_cobradas);
+    const rp=usd?(v-c):num(p.resultado_no_realizado);
+    const rt=usd?(v-c+(isFinite(rc)?rc:0)):num(p.resultado_total_no_realizado);
+    const rtp=usd?(isFinite(rt)&&isFinite(c)&&c?rt/c*100:NaN):num(p.resultado_total_pct);
+    const F2=usd?fmtU:fmt;
+    return `<tr>
+      <td>${p.client_name||'—'}</td><td>${p.broker_code} · ${p.account}</td><td><b>${p.ticker}</b></td>
+      <td>${fmtQ(num(p.quantity))}</td>
+      <td>${fmtP(ppc)}</td><td>${fmtP(spot)}</td><td>${F2(v)}</td>
+      <td>${fmtQ(num(p.dias_tenencia))}</td>
+      <td class="${cls(rp)}">${F2(rp)}</td><td>${F2(rc)}</td>
+      <td class="${cls(rt)}">${F2(rt)}</td><td class="${cls(rtp)}">${pct(rtp)}</td>
+      <td>${pct(num(p.tir_plazo_pct))}</td><td>${pct(num(p.tir_anual_pct))}</td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="14" style="text-align:center;color:var(--text3);padding:24px">Sin posiciones</td></tr>`;
+
+  // Realizado por mes (siempre ARS: el mensual del backend acumula en ARS)
+  const men=filtrar(mensuales);
+  const gm={};
+  men.forEach(m=>{
+    if(!m.mes) return;
+    if(!gm[m.mes]) gm[m.mes]={res:0,ren:0,tot:0,n:0};
+    gm[m.mes].res+=num(m.resultado_ars)||0;
+    gm[m.mes].ren+=num(m.rentas_cobradas_ars)||0;
+    gm[m.mes].tot+=num(m.resultado_total_ars)||0;
+    gm[m.mes].n+=num(m.n_operaciones)||0;
+  });
+  const mesesOrd=Object.keys(gm).sort().reverse();
+  $('tbodyMes').innerHTML=mesesOrd.length?mesesOrd.map(mes=>{
+    const g=gm[mes];
+    return `<tr><td>${mes}</td><td class="${cls(g.res)}">${fmt(g.res)}</td><td>${fmt(g.ren)}</td><td class="${cls(g.tot)}">${fmt(g.tot)}</td><td>${g.n}</td></tr>`;
+  }).join(''):`<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:24px">Sin realizado</td></tr>`;
+
+  // Rentas cobradas por mes (tab RENTAS: cobros reales, tenencia abierta o vendida)
+  const ren=filtrar(rentas);
+  const gr={};
+  ren.forEach(r=>{
+    const mes=(r.fecha||'').slice(0,7);
+    if(!mes) return;
+    if(!gr[mes]) gr[mes]={m:0,n:0};
+    gr[mes].m+=num(r.monto_total)||0; gr[mes].n++;
+  });
+  const rMeses=Object.keys(gr).sort().reverse();
+  $('tbodyRentas').innerHTML=rMeses.length?rMeses.map(mes=>
+    `<tr><td>${mes}</td><td>${fmt(gr[mes].m)}</td><td>${gr[mes].n}</td></tr>`
+  ).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:24px">Sin rentas</td></tr>`;
+}
+
+restore();
+</script>
+</body>
+</html>
