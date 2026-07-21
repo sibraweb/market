@@ -135,7 +135,7 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 // Hoja SIBRA_BROKERS_OPERACIONES (backend: historicos/fifo/performance rebuild).
 const OPERACIONES_SHEET_ID = '1hjo-ESxQA4yX-MHE7NQ3ipLpvhrGIVXC_fN3TotNmIw';
 
-let token=null, posiciones=[], realizado=[], curva=[], moneda='ars', vista='informe', freq='M';
+let token=null, posiciones=[], realizado=[], curva=[], moneda='ars', vista='informe', freq='M', modoEvol='valor';
 const $=id=>document.getElementById(id);
 const fmt=n=>isFinite(n)?'$'+Math.round(n).toLocaleString('es-AR'):'—';
 const fmtU=n=>isFinite(n)?'U$D '+n.toLocaleString('es-AR',{maximumFractionDigits:0}):'—';
@@ -194,6 +194,7 @@ function poblarFiltros(){
 
 function setMoneda(m){ moneda=m; $('btn-ars').classList.toggle('active',m==='ars'); $('btn-usd').classList.toggle('active',m==='usd'); render(); }
 function setFreq(f){ freq=f; $('btn-M').classList.toggle('active',f==='M'); $('btn-W').classList.toggle('active',f==='W'); render(); }
+function setModoEvol(m){ modoEvol=m; render(); }
 function setVista(v){
   vista=v;
   ['informe','abiertas','cerradas','evolucion','heatmap'].forEach(x=>$('v-'+x).classList.toggle('active',x===v));
@@ -278,6 +279,11 @@ function renderCerradas(){
 }
 
 // ── Serie de CURVA para el filtro actual (consolidado por defecto) ───────
+// Devuelve por fecha: valor, flujo del período y RENDIMIENTO del período.
+// El rendimiento NO se puede sumar entre cuentas: cuando el filtro agrupa
+// varias, se recalcula desde los valores y flujos sumados (Dietz simple, el
+// flujo pesa medio período); con una sola fila se usa el Modified Dietz que
+// ya calculó el backend con las fechas reales de cada flujo.
 function serieCurva(){
   const alyc=$('alycSel').value, cli=$('clienteSel').value;
   let rows=curva.filter(r=>r.freq===freq);
@@ -286,30 +292,64 @@ function serieCurva(){
   }else{
     rows=rows.filter(r=>r.broker_code!=='__ALL__' && (!alyc||r.broker_code===alyc) && (!cli||r.client_name===cli));
   }
-  // sumar por fecha (varias cuentas)
   const g={};
   rows.forEach(r=>{
     const f=r.fecha; if(!f) return;
-    if(!g[f]) g[f]={fecha:f,ars:0,usd:0,sinPrecio:false};
-    g[f].ars+=num(r.valor_ars)||0; g[f].usd+=num(r.valor_usd)||0;
-    if(String(r.sin_precio).trim() && r.sin_precio!=='0' && r.sin_precio!=='') g[f].sinPrecio=true;
+    if(!g[f]) g[f]={fecha:f,ars:0,usd:0,flujoArs:0,flujoUsd:0,n:0,retArs:NaN,retUsd:NaN,sinPrecio:false};
+    const x=g[f];
+    x.ars+=num(r.valor_ars)||0; x.usd+=num(r.valor_usd)||0;
+    x.flujoArs+=num(r.flujo_ars)||0; x.flujoUsd+=num(r.flujo_usd)||0;
+    x.retArs=num(r.retorno_pct); x.retUsd=num(r.retorno_usd_pct);
+    x.n++;
+    if(String(r.sin_precio||'').trim()) x.sinPrecio=true;
   });
-  return Object.values(g).sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  const serie=Object.values(g).sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  // Si hay más de una cuenta por fecha, el retorno del backend no sirve: recalcular.
+  for(let i=0;i<serie.length;i++){
+    const p=serie[i], prev=serie[i-1];
+    if(p.n>1){
+      ['ars','usd'].forEach(m=>{
+        const key=m==='ars'?'retArs':'retUsd', fl=m==='ars'?'flujoArs':'flujoUsd';
+        if(!prev){ p[key]=NaN; return; }
+        const base=prev[m]+p[fl]/2;
+        p[key]=base>0?((p[m]-prev[m]-p[fl])/base)*100:NaN;
+      });
+    }
+    if(i===0){ p.retArs=NaN; p.retUsd=NaN; }
+  }
+  // TWR acumulado encadenado sobre los retornos ya resueltos
+  let accA=1, accU=1;
+  serie.forEach(p=>{
+    if(isFinite(p.retArs)) accA*=(1+p.retArs/100);
+    if(isFinite(p.retUsd)) accU*=(1+p.retUsd/100);
+    p.twrArs=(accA-1)*100; p.twrUsd=(accU-1)*100;
+  });
+  return serie;
 }
 
 // ── EVOLUCIÓN (línea del valor de cartera) ───────────────────────────────
 function renderEvolucion(){
   const usd=moneda==='usd';
-  const serie=serieCurva().map(d=>({fecha:d.fecha,valor:usd?d.usd:d.ars}));
+  const full=serieCurva();
+  // modo 'valor' = pesos/dólares de cartera; 'twr' = rendimiento base 100
+  const serie=full.map(d=>({fecha:d.fecha,
+    valor: modoEvol==='twr' ? 100*(1+(usd?d.twrUsd:d.twrArs)/100) : (usd?d.usd:d.ars)}));
   if(serie.length<2){ $('vista').innerHTML=`<div class="card"><div class="status" style="padding:24px;text-align:center">Sin serie de evolución todavía (la curva CURVA se genera en el ciclo del backend). ${curva.length?'':'La tab CURVA está vacía.'}</div></div>`; return; }
   const W=1000,H=340,pl=70,pr=16,pt=16,pb=34;
-  const xs=serie.map((_,i)=>i), ys=serie.map(d=>d.valor);
-  const ymin=Math.min(0,...ys), ymax=Math.max(...ys);
+  const ys=serie.map(d=>d.valor);
+  // Valor: base cero (es una magnitud). Rendimiento: índice base 100, no se
+  // fuerza el cero — la referencia es la línea de 100.
+  let ymin,ymax;
+  if(modoEvol==='twr'){
+    const lo=Math.min(100,...ys), hi=Math.max(100,...ys), pad=Math.max(1,(hi-lo)*0.12);
+    ymin=lo-pad; ymax=hi+pad;
+  }else{ ymin=Math.min(0,...ys); ymax=Math.max(...ys); }
   const X=i=>pl+(W-pl-pr)*(i/(serie.length-1));
   const Y=v=>H-pb-(H-pt-pb)*((v-ymin)/((ymax-ymin)||1));
   const linePath=serie.map((d,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(d.valor).toFixed(1)}`).join(' ');
   const areaPath=`${linePath} L${X(serie.length-1).toFixed(1)},${Y(ymin).toFixed(1)} L${X(0).toFixed(1)},${Y(ymin).toFixed(1)} Z`;
-  const F=usd?fmtU:fmt;
+  // en modo rendimiento el eje es base 100, no plata
+  const F=modoEvol==='twr' ? (v=>isFinite(v)?v.toFixed(0):'—') : (usd?fmtU:fmt);
   // ticks Y (4)
   let yticks='';
   for(let k=0;k<=4;k++){ const v=ymin+(ymax-ymin)*k/4; const y=Y(v); yticks+=`<line x1="${pl}" y1="${y}" x2="${W-pr}" y2="${y}" stroke="var(--border)" stroke-width="1"/><text x="${pl-6}" y="${y+3}" text-anchor="end" fill="var(--text3)" font-size="10">${F(v)}</text>`; }
@@ -317,34 +357,46 @@ function renderEvolucion(){
   const step=Math.max(1,Math.ceil(serie.length/8));
   let xticks='';
   for(let i=0;i<serie.length;i+=step){ const x=X(i); xticks+=`<text x="${x}" y="${H-pb+16}" text-anchor="middle" fill="var(--text3)" font-size="10">${serie[i].fecha.slice(0,7)}</text>`; }
-  const ini=serie[0].valor, fin=serie[serie.length-1].valor;
-  const varTot=ini?((fin/ini-1)*100):NaN;
+  const twrFin=usd?full[full.length-1].twrUsd:full[full.length-1].twrArs;
+  const dias=(new Date(full[full.length-1].fecha)-new Date(full[0].fecha))/86400000;
+  const twrAnual=(dias>30&&isFinite(twrFin))?((Math.pow(1+twrFin/100,365/dias)-1)*100):NaN;
+  const flujoTot=full.reduce((s,p)=>s+(usd?p.flujoUsd:p.flujoArs),0);
   $('vista').innerHTML=`
     <div class="kpis">
-      <div class="kpi"><div class="lbl">Valor inicial (${serie[0].fecha})</div><div class="val">${F(ini)}</div></div>
-      <div class="kpi"><div class="lbl">Valor actual</div><div class="val">${F(fin)}</div></div>
-      <div class="kpi"><div class="lbl">Variación del período</div><div class="val ${cls(varTot)}">${pct(varTot)}</div></div>
+      <div class="kpi"><div class="lbl">Valor actual</div><div class="val">${(usd?fmtU:fmt)(usd?full[full.length-1].usd:full[full.length-1].ars)}</div></div>
+      <div class="kpi"><div class="lbl">Rendimiento acumulado (TWR)</div><div class="val ${cls(twrFin)}">${pct(twrFin)}</div></div>
+      <div class="kpi"><div class="lbl">Anualizado</div><div class="val ${cls(twrAnual)}">${pct(twrAnual)}</div></div>
+      <div class="kpi"><div class="lbl">Flujo neto del período</div><div class="val">${(usd?fmtU:fmt)(flujoTot)}</div></div>
       <div class="kpi"><div class="lbl">Puntos (${freq==='M'?'meses':'semanas'})</div><div class="val">${serie.length}</div></div>
     </div>
-    <div class="card"><div class="card-title">Evolución del valor de cartera <span class="muted">· ${usd?'USD (MEP)':'ARS'} · ${freq==='M'?'mensual':'semanal'} · valuación data912 al corte</span></div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <div class="card-title" style="margin:0">${modoEvol==='twr'?'Rendimiento acumulado (base 100)':'Valor de cartera'} <span class="muted">· ${usd?'USD (MEP)':'ARS'} · ${freq==='M'?'mensual':'semanal'}</span></div>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn ${modoEvol==='valor'?'active':''}" onclick="setModoEvol('valor')">Valor</button>
+        <button class="btn ${modoEvol==='twr'?'active':''}" onclick="setModoEvol('twr')">Rendimiento</button>
+      </div>
       <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
         ${yticks}
+        ${modoEvol==='twr'?`<line x1="${pl}" y1="${Y(100)}" x2="${W-pr}" y2="${Y(100)}" stroke="var(--text3)" stroke-width="1" stroke-dasharray="4 3"/><text x="${W-pr-2}" y="${Y(100)-5}" text-anchor="end" fill="var(--text3)" font-size="9">base 100</text>`:''}
         <path d="${areaPath}" fill="var(--red)" opacity="0.08"/>
         <path d="${linePath}" fill="none" stroke="var(--red-light)" stroke-width="2" stroke-linejoin="round"/>
         ${xticks}
       </svg>
-      <div class="status" style="margin-top:6px">Valor de la tenencia (títulos) revaluada al cierre de data912 de cada corte. Aún no descuenta aportes/retiros — es el valor de cartera, no un rendimiento puro.</div>
+      <div class="status" style="margin-top:6px">
+        <b>Valor</b>: tenencia de títulos revaluada al cierre de data912 de cada corte — sube y baja también por compras/ventas.
+        <b>Rendimiento</b>: TWR encadenado (Modified Dietz), que descuenta esos flujos y mide solo la gestión. El anualizado compone el acumulado a 365 días.
+      </div>
     </div>`;
 }
 
 // ── HEATMAP (variación del valor por período) ────────────────────────────
 function renderHeatmap(){
   const usd=moneda==='usd';
-  const serie=serieCurva().map(d=>({fecha:d.fecha,valor:usd?d.usd:d.ars}));
+  const serie=serieCurva();
   if(serie.length<2){ $('vista').innerHTML=`<div class="card"><div class="status" style="padding:24px;text-align:center">Sin serie para el heatmap todavía (la curva CURVA se genera en el ciclo del backend).</div></div>`; return; }
-  // retorno período a período
-  const rets=[];
-  for(let i=1;i<serie.length;i++){ const p=serie[i-1].valor, c=serie[i].valor; rets.push({fecha:serie[i].fecha, r:p?(c/p-1):NaN}); }
+  // Rendimiento REAL del período (Modified Dietz: ya descuenta compras/ventas)
+  const rets=serie.slice(1).map(p=>({fecha:p.fecha, r:(usd?p.retUsd:p.retArs)/100}));
   const maxAbs=Math.max(0.01,...rets.map(x=>Math.abs(x.r)).filter(isFinite));
   const color=r=>{ if(!isFinite(r)) return 'var(--bg3)'; const t=Math.min(1,Math.abs(r)/maxAbs); const a=(0.15+0.85*t).toFixed(2);
     return r>=0?`rgba(34,197,94,${a})`:`rgba(225,6,0,${a})`; };
@@ -377,9 +429,9 @@ function renderHeatmap(){
     html+='</div>';
   }
   $('vista').innerHTML=`<div class="card">
-    <div class="card-title">Heatmap de variación del valor <span class="muted">· ${usd?'USD':'ARS'} · ${freq==='M'?'mensual (con acumulado anual)':'semanal'}</span></div>
+    <div class="card-title">Rendimiento por período <span class="muted">· ${usd?'USD (MEP)':'ARS'} · ${freq==='M'?'mensual (con acumulado anual)':'semanal'} · time-weighted</span></div>
     ${html}
-    <div class="status" style="margin-top:10px">Verde = subió, rojo = bajó; intensidad por magnitud. Es la variación del valor de cartera período a período (todavía sin separar aportes/retiros).</div>
+    <div class="status" style="margin-top:10px">Verde = ganó, rojo = perdió; intensidad por magnitud. Rendimiento <b>time-weighted (Modified Dietz)</b>: descuenta las compras y ventas del período ponderadas por los días que estuvieron invertidas, así el número mide la gestión y no el capital que entró o salió. El acumulado anual encadena los meses. Valúa solo títulos (no el efectivo ocioso).</div>
   </div>`;
 }
 
