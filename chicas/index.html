@@ -551,6 +551,7 @@ const DATA912      = 'https://data912.com/live';
 let token       = null;
 let posiciones  = [];
 let clientes    = [];
+let caucionesPorCuenta = {}; // `${alyc}|${normCC(cc)}` -> {ars, usd} (TOMADORA vigente)
 let priceIndex  = {};
 let operHoy     = [];   // operaciones del día leídas de Sheets
 let ventaTickers   = new Set();
@@ -817,6 +818,16 @@ async function cargarTenenciasSheet(fresh=false) {
       alyc:f.alyc, comitente:normCC(f.comitente), cliente:f.cliente,
       ticker:f.ticker, tenencia:f.cantidad,
     })));
+    // Cauciones (TOMADORA vigente) desde la misma base -- clave (alyc, cc)
+    // igual que market/actual, para no cruzar cuentas que comparten número
+    // de comitente entre brokers distintos.
+    const { caucionByAccount } = await SibraBrokers.loadCauciones({fresh});
+    const cauc = caucionByAccount();
+    caucionesPorCuenta = {};
+    for (const key in cauc) {
+      const [b, acc] = key.split('|');
+      caucionesPorCuenta[`${b}|${normCC(acc)}`] = cauc[key];
+    }
     ['ADCAP','IEB','BCCH'].forEach(alyc=>{
       const key=alyc.toLowerCase();
       const n=posiciones.filter(p=>p.alyc===alyc).length;
@@ -890,7 +901,6 @@ function parseClientes(buf) {
     cc:normCC(r[ccKey]??r.cc??r.CC??r.CCC??r.Cuenta??''),
     cliente:String(r.cliente||r.Cliente||r.CLIENTE||'').trim(),
     alyc:String(r.alyc||r.ALyC||r.ALYC||'').trim().toUpperCase(),
-    caucionPesos:parseNum(r.caucionPesos||r['Caucion en Pesos']||0),
   })).filter(r=>r.cc);
 }
 // El número de comitente se repite entre brokers (ver [[project_sibra_brokers]]
@@ -919,8 +929,8 @@ function stockReal(alyc, comitente, ticker) {
 
 // Saldo líquido ARS de un comitente (cash de cartera + producido por ventas hoy)
 function saldoLiquido(alyc, comitente) {
-  // Cash ARS de cartera
-  const cashPos=posiciones.find(p=>p.alyc===alyc&&normCC(p.comitente)===normCC(comitente)&&p.ticker==='CASH_ARS');
+  // Cash ARS de cartera (ticker canónico 'PESOS', ver CASH_MAP en shared/sibra-brokers-data.js)
+  const cashPos=posiciones.find(p=>p.alyc===alyc&&normCC(p.comitente)===normCC(comitente)&&p.ticker==='PESOS');
   const cashARS=Math.max(cashPos?.tenencia||0, 0);
   // Producido por ventas de hoy
   const ventasHoy=operHoy.filter(o=>o.tipo==='VENTA'&&o.alyc===alyc&&normCC(o.comitente)===normCC(comitente))
@@ -935,7 +945,7 @@ function saldoLiquido(alyc, comitente) {
 //  TOTALES NETOS Y BRUTOS POR CLIENTE
 // ═══════════════════════════════════════════
 function getClienteCarteras(alyc, comitente) {
-  // Calcular tenencia neta: suma de todos los tickers (excluyendo CASH_USD_EXT, CASH_USD_7000)
+  // Calcular tenencia neta: suma de todos los tickers (excluyendo USD_CABLE, USD_DIVISA)
   let netaARS = 0;
   let netaUSD = 0;
   let brutaARS = 0;
@@ -947,31 +957,42 @@ function getClienteCarteras(alyc, comitente) {
   posiciones.forEach(p => {
     if (p.alyc !== alyc || normCC(p.comitente) !== normCC(comitente)) return;
 
-    const price = getPrice(p.ticker) || 0;
     const tenencia = p.tenencia || 0;
-    const valor = tenencia * price;
 
-    if (p.ticker.startsWith('CASH_')) {
-      if (p.ticker === 'CASH_ARS') {
-        netaARS += tenencia;
-        brutaARS += tenencia;
-      } else if (p.ticker === 'CASH_USD_MEP' || p.ticker === 'CASH_USD') {
-        netaUSD += tenencia;
-        brutaUSD += tenencia;
-      } else if (p.ticker === 'CASH_USD_EXT' || p.ticker === 'CASH_USD_7000') {
-        // Los dólares exterior no se cuentan en neta
-        brutaUSD += tenencia;
-      }
+    // Efectivo: SibraBrokers.loadTenencias() ya normaliza el ticker a estos
+    // 4 buckets canónicos (ver shared/sibra-brokers-data.js CASH_MAP) --
+    // 'CASH_ARS'/'CASH_USD'/etc. (nombres viejos, de antes de esa
+    // normalización) ya NO existen en `posiciones`, así que chequearlos acá
+    // dejaba el efectivo entero sin sumar (bug confirmado 2026-07-23: el
+    // saldo en USD_MEP, la posición más grande de una cuenta, caía al else
+    // de abajo y se valuaba a $0 porque 'USD_MEP' no es un ticker de data912).
+    if (p.ticker === 'PESOS') {
+      netaARS += tenencia;
+      brutaARS += tenencia;
+    } else if (p.ticker === 'USD_MEP') {
+      netaUSD += tenencia;
+      brutaUSD += tenencia;
+    } else if (p.ticker === 'USD_DIVISA' || p.ticker === 'USD_CABLE') {
+      // Dólares no líquidos localmente (7000 / exterior): no cuentan en neta
+      brutaUSD += tenencia;
     } else {
-      // Papeles: se cuentan en ARS
-      netaARS += valor;
-      brutaARS += valor;
+      // Papeles: se cuentan en ARS, al precio spot vivo
+      const price = getPrice(p.ticker) || 0;
+      netaARS += tenencia * price;
+      brutaARS += tenencia * price;
     }
   });
 
   // Convertir a ARS
   const netaArsTotal = netaARS + (netaUSD * mep);
-  const brutaArsTotal = brutaARS + (brutaUSD * mep);
+  let brutaArsTotal = brutaARS + (brutaUSD * mep);
+
+  // Caución tomadora vigente: no es tenencia (no está en `posiciones`) pero
+  // sí es cartera bruta -- mismo criterio que market/actual (brutaCliente =
+  // netaCliente + caucionTotalARS). Sin esto, % bruto queda inflado porque
+  // el denominador no incluye la plata afuera en caución.
+  const caucion = caucionesPorCuenta[`${alyc}|${normCC(comitente)}`] || { ars: 0, usd: 0 };
+  brutaArsTotal += caucion.ars + (caucion.usd * mep);
 
   return { neta: netaArsTotal, bruta: brutaArsTotal };
 }
@@ -1026,16 +1047,21 @@ function actualizarSelectores() {
 // ═══════════════════════════════════════════
 //  TICKER SEARCH — VENTAS (multi)
 // ═══════════════════════════════════════════
+// Tickers canónicos de efectivo (ver CASH_MAP en shared/sibra-brokers-data.js
+// -- SibraBrokers.loadTenencias() ya normaliza el ticker de cada broker a
+// estos 4 nombres, reemplazando los viejos CASH_ARS/CASH_USD/etc.).
 const CASH_TICKERS=[
-  {ticker:'CASH_ARS',     label:'Pesos (ARS)'},
-  {ticker:'CASH_USD_7000',label:'Dólar 7000'},
-  {ticker:'CASH_USD_MEP', label:'Dólar MEP'},
-  {ticker:'CASH_USD_EXT', label:'Dólar Cable / Exterior'},
+  {ticker:'PESOS',    label:'Pesos (ARS)'},
+  {ticker:'USD_DIVISA',label:'Dólar 7000'},
+  {ticker:'USD_MEP',  label:'Dólar MEP'},
+  {ticker:'USD_CABLE',label:'Dólar Cable / Exterior'},
 ];
+const CASH_TICKER_SET=new Set(CASH_TICKERS.map(c=>c.ticker));
+function isCashTicker(t){ return CASH_TICKER_SET.has(t); }
 function getTickerList(q) {
   const counts={};
   posiciones.forEach(p=>{
-    if(p.ticker.startsWith('CASH_')) return;
+    if(isCashTicker(p.ticker)) return;
     counts[p.ticker]=(counts[p.ticker]||0)+1;
   });
   const q2=(q||'').toUpperCase().trim();
@@ -1466,7 +1492,7 @@ function resetCompras() { compraTicker=null; compraCants={}; $('compraTickerInpu
 function renderNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
   let filas=posiciones
-    .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
+    .filter(p=>isCashTicker(p.ticker)&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
     .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}));
   if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
   else filas=sortRows(filas,'alyc');
@@ -1486,19 +1512,19 @@ function renderNegativoss() {
     <tbody>${filas.map(p=>`<tr>
       <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
       <td>${cashLabel(p.ticker)}</td>
-      <td class="td-r" style="color:var(--red-light)">${p.ticker==='CASH_ARS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}</td>
+      <td class="td-r" style="color:var(--red-light)">${p.ticker==='PESOS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
 function waNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
   const filas=posiciones
-    .filter(p=>p.ticker.startsWith('CASH_')&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
+    .filter(p=>isCashTicker(p.ticker)&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
     .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}))
     .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
   if(!filas.length){alert('Sin saldos negativos para exportar');return;}
   const titulo=`*Saldos negativos${alycFil?' - '+alycFil:''}*\n`;
-  const lineas=filas.map(p=>`${p.alyc} | ${p.comitente} | ${p.cli} | ${cashLabel(p.ticker)} | ${p.ticker==='CASH_ARS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}`);
+  const lineas=filas.map(p=>`${p.alyc} | ${p.comitente} | ${p.cli} | ${cashLabel(p.ticker)} | ${p.ticker==='PESOS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}`);
   window.open('https://wa.me/?text='+encodeURIComponent(titulo+lineas.join('\n')));
 }
 
@@ -1508,7 +1534,7 @@ function waNegativoss() {
 function renderExterior() {
   const alycFil=$('extFilterAlyc')?.value||'';
   let filas=posiciones
-    .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
+    .filter(p=>['USD_CABLE','USD_DIVISA'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
     .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}));
   if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
   else filas=sortRows(filas,'alyc');
@@ -1535,7 +1561,7 @@ function renderExterior() {
 function waExterior() {
   const alycFil=$('extFilterAlyc')?.value||'';
   const filas=posiciones
-    .filter(p=>['CASH_USD_EXT','CASH_USD_7000'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
+    .filter(p=>['USD_CABLE','USD_DIVISA'].includes(p.ticker)&&p.tenencia>0&&(!alycFil||p.alyc===alycFil))
     .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}))
     .sort((a,b)=>a.alyc.localeCompare(b.alyc)||b.tenencia-a.tenencia);
   if(!filas.length){alert('Sin dólares exterior/7000 para exportar');return;}
