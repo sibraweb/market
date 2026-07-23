@@ -102,7 +102,7 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
     </div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Mes</th><th>Comisión</th><th>IVA</th><th>Derechos</th><th>Custodia</th><th>Retención</th><th>Total costos</th></tr></thead>
+        <thead><tr><th>Mes</th><th>Comisión</th><th>IVA</th><th>D. Mercado</th><th>D. Registro</th><th>Derechos s/desglose</th><th>Custodia</th><th>Retención</th><th>Total costos</th></tr></thead>
         <tbody id="tbodyMeses"></tbody>
       </table>
     </div>
@@ -120,8 +120,8 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 // ═══════════════════════════════════════════
 const COMISIONES_SHEET_ID = '1DLSIdaYlWf7NMP7nIA1jUPCFL_-Q33xqDsMS7kPSabw';
 const TAB = 'CURRENT';
-const CATS = ['COMISION','IVA','DERECHOS','CUSTODIA','RETENCION'];
-const CAT_LBL = {COMISION:'Comisión',IVA:'IVA',DERECHOS:'Derechos',CUSTODIA:'Custodia',RETENCION:'Retención'};
+const CATS = ['COMISION','IVA','D_MERCADO','D_REGISTRO','DERECHOS','CUSTODIA','RETENCION'];
+const CAT_LBL = {COMISION:'Comisión',IVA:'IVA',D_MERCADO:'D. Mercado',D_REGISTRO:'D. Registro',DERECHOS:'Derechos s/desglose',CUSTODIA:'Custodia',RETENCION:'Retención'};
 
 let token=null, filas=[], vista='alyc';
 const $=id=>document.getElementById(id);
@@ -198,7 +198,7 @@ function render(){
   $('kpis').innerHTML=`
     <div class="kpi"><div class="lbl">Comisión total</div><div class="val">${fmt(tot.COMISION)}</div></div>
     <div class="kpi"><div class="lbl">IVA</div><div class="val">${fmt(tot.IVA)}</div></div>
-    <div class="kpi"><div class="lbl">Gastos (derechos+custodia)</div><div class="val">${fmt(tot.DERECHOS+tot.CUSTODIA)}</div></div>
+    <div class="kpi"><div class="lbl">Gastos (derechos+custodia)</div><div class="val">${fmt(tot.D_MERCADO+tot.D_REGISTRO+tot.DERECHOS+tot.CUSTODIA)}</div></div>
     <div class="kpi"><div class="lbl">Retenciones</div><div class="val">${fmt(tot.RETENCION)}</div></div>`;
 
   // tabla
@@ -207,7 +207,7 @@ function render(){
   $('tbody').innerHTML=filasOrd.length?filasOrd.map(([k,v])=>{
     const totalCostos=CATS.reduce((s,c)=>s+v[c],0);
     return `<tr><td>${k}</td>${CATS.map(c=>`<td>${fmt(v[c])}</td>`).join('')}<td><strong>${fmt(totalCostos)}</strong></td></tr>`;
-  }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Sin datos${mes?' para '+mes:''}</td></tr>`;
+  }).join(''):`<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px">Sin datos${mes?' para '+mes:''}</td></tr>`;
 
   renderMeses();
 }
@@ -226,7 +226,7 @@ function renderMeses(){
     const v=g[m];
     const total=CATS.reduce((s,c)=>s+v[c],0);
     return `<tr><td>${m}</td>${CATS.map(c=>`<td>${fmt(v[c])}</td>`).join('')}<td><strong>${fmt(total)}</strong></td></tr>`;
-  }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Sin datos</td></tr>`;
+  }).join(''):`<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px">Sin datos</td></tr>`;
 }
 
 restore();
