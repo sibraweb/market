@@ -101,22 +101,16 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
   </div>
 
   <div class="card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-      <div style="font-family:'Raleway',sans-serif;letter-spacing:1px;text-transform:uppercase;font-size:12px;color:var(--text2)">
-        ADCAP — comisión estimada por volumen
-      </div>
-      <span class="spacer" style="flex:1"></span>
-      <label class="status">% estimado sobre volumen operado, este mes:</label>
-      <input class="pctInput" id="pctAdcapMes" type="number" min="0" max="100" step="0.01" onchange="setPctAdcapMes(this.value)"/>
-      <span class="status">%</span>
+    <div style="font-family:'Raleway',sans-serif;letter-spacing:1px;text-transform:uppercase;font-size:12px;color:var(--text2);margin-bottom:10px">
+      Evolución mensual
     </div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Cliente</th><th>Cuenta</th><th>Volumen operado (compra+venta)</th><th>Comisión estimada</th></tr></thead>
-        <tbody id="tbodyAdcap"></tbody>
+        <thead><tr><th>Mes</th><th>Comisión (c/IVA)</th><th>Derechos</th><th>Custodia</th><th>Retención</th><th>Total costos</th><th>Me corresponde</th></tr></thead>
+        <tbody id="tbodyMeses"></tbody>
       </table>
     </div>
-    <div class="status" style="margin-top:8px">ADCAP no discrimina su comisión de compra/venta como línea propia en el ledger (queda adentro del neto del trade) — esto es una ESTIMACIÓN sobre el volumen operado, no un dato real capturado.</div>
+    <div class="status" style="margin-top:8px">Todas las comisiones son REALES: ADCAP trae el arancel por movimiento en su ledger; BCCH e IEB por boleto (pantalla "Boletos del día") con fallback al agregado mensual del broker donde el histórico día-a-día todavía no se completó. "Me corresponde" aplica el % configurado de cada mes.</div>
   </div>
 </main>
 </div>
@@ -188,11 +182,9 @@ function setVista(v){ vista=v; $('btn-alyc').classList.toggle('active',v==='alyc
 function getPctMes(mes){ const v=localStorage.getItem('sibra_com_pct_'+(mes||'ALL')); return v!==null?parseFloat(v):0.5; }
 function setPctMes(v){ const mes=$('mesSel').value; localStorage.setItem('sibra_com_pct_'+(mes||'ALL'),String((parseFloat(v)||0)/100)); render(); }
 
-// % estimado de comisión ADCAP sobre volumen operado, por mes (localStorage).
-// Sin default "razonable" propio -- arranca en 0 hasta que se cargue a mano,
-// para no inventar una tasa de comisión que nadie confirmó.
-function getPctAdcapMes(mes){ const v=localStorage.getItem('sibra_com_pct_adcap_'+(mes||'ALL')); return v!==null?parseFloat(v):0; }
-function setPctAdcapMes(v){ const mes=$('mesSel').value; localStorage.setItem('sibra_com_pct_adcap_'+(mes||'ALL'),String((parseFloat(v)||0)/100)); render(); }
+// (La estimación de ADCAP por % sobre volumen se eliminó 2026-07-23: el
+// backend ahora captura el arancel REAL por movimiento del ledger de ADCAP
+// — categoria COMISION como cualquier otro broker, nada que estimar.)
 
 function render(){
   const mes=$('mesSel').value;
@@ -228,23 +220,26 @@ function render(){
     return `<tr><td>${k}</td>${CATS.map(c=>`<td>${fmt(v[c])}</td>`).join('')}<td>${fmt(totalCostos)}</td><td class="me">${fmt(corr)}</td></tr>`;
   }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Sin datos${mes?' para '+mes:''}</td></tr>`;
 
-  renderAdcap(datos, mes);
+  renderMeses();
 }
 
-function renderAdcap(datos, mes){
-  const pctAdcap=getPctAdcapMes(mes);
-  $('pctAdcapMes').value=pctAdcap*100;
-  // agrupa por (cuenta) -- ADCAP siempre es la misma ALyC acá, lo que varía es la cuenta/cliente
+// Evolución mensual: totales por categoría de TODAS las filas (sin filtro de
+// mes — es la serie completa), con el "% que me corresponde" propio de cada
+// mes aplicado a su comisión. Más nuevo arriba.
+function renderMeses(){
   const g={};
-  datos.filter(f=>f.categoria==='VOLUMEN_ADCAP').forEach(f=>{
-    const k=f.account||'(sin cuenta)';
-    if(!g[k]) g[k]={cliente:f.client_name||'—', volumen:0};
-    g[k].volumen+=f.monto_ars;
+  filas.forEach(f=>{
+    if(!f.mes||!CATS.includes(f.categoria)) return;
+    if(!g[f.mes]) g[f.mes]={COMISION:0,DERECHOS:0,CUSTODIA:0,RETENCION:0};
+    g[f.mes][f.categoria]+=f.monto_ars;
   });
-  const filas=Object.entries(g).sort((a,b)=>b[1].volumen-a[1].volumen);
-  $('tbodyAdcap').innerHTML=filas.length?filas.map(([cuenta,v])=>
-    `<tr><td>${v.cliente}</td><td>${cuenta}</td><td>${fmt(v.volumen)}</td><td class="me">${fmt(v.volumen*pctAdcap)}</td></tr>`
-  ).join(''):`<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:24px">Sin volumen de ADCAP${mes?' para '+mes:''}</td></tr>`;
+  const meses=Object.keys(g).sort().reverse();
+  $('tbodyMeses').innerHTML=meses.length?meses.map(m=>{
+    const v=g[m];
+    const total=CATS.reduce((s,c)=>s+v[c],0);
+    const corr=v.COMISION*getPctMes(m);
+    return `<tr><td>${m}</td><td>${fmt(v.COMISION)}</td><td>${fmt(v.DERECHOS)}</td><td>${fmt(v.CUSTODIA)}</td><td>${fmt(v.RETENCION)}</td><td>${fmt(total)}</td><td class="me">${fmt(corr)}</td></tr>`;
+  }).join(''):`<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Sin datos</td></tr>`;
 }
 
 restore();
