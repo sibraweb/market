@@ -390,6 +390,7 @@ th:hover { background:var(--bg4); }
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-secondary btn-sm" onclick="exportarOrdenesExcel()">⬇ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportarOrdenesPorAlyc()">⬇ Excel por ALyC</button>
         <button class="btn btn-secondary btn-sm" onclick="resetEnviadosVenta()">Resetear enviados</button>
       </div>
     </div>
@@ -445,6 +446,7 @@ th:hover { background:var(--bg4); }
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-secondary btn-sm" onclick="exportarOrdenesExcel()">⬇ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportarOrdenesPorAlyc()">⬇ Excel por ALyC</button>
         <button class="btn btn-secondary btn-sm" onclick="resetEnviadosCompra()">Resetear enviados</button>
       </div>
     </div>
@@ -1548,6 +1550,28 @@ function exportarOrdenesExcel() {
   const nombre=`ORDENES_CHICAS_${fechaHoy()}.xlsx`;
   XLSX.writeFile(wb,nombre);
   log(`✅ Excel exportado: ${nombre} — ${filas.length} órdenes en ${alycs.length} hoja(s) (una por ALyC)`,'log-ok');
+}
+
+// Igual que exportarOrdenesExcel pero UN ARCHIVO POR ALyC (mismo formato que
+// el "Enviar a ALyC" de rotaciones: un .xlsx por mesa, listo para adjuntar en
+// el grupo de cada una). Descarga escalonada (400ms) para que el navegador no
+// bloquee las descargas múltiples — Chrome pide permiso la primera vez.
+function exportarOrdenesPorAlyc() {
+  const filas=ordenesParaExportar();
+  if(!filas.length){alert('No hay órdenes armadas para exportar — seleccioná tickers y cantidades primero');return;}
+  const headers=['Tipo','ALyC','CC','Cliente','Ticker','Cantidad','Precio spot','Monto ARS','Enviado WA'];
+  const alycs=[...new Set(filas.map(f=>f.ALyC))].sort();
+  alycs.forEach((alyc,i)=>{
+    setTimeout(()=>{
+      const propias=filas.filter(f=>f.ALyC===alyc);
+      const wb=XLSX.utils.book_new();
+      const ws=XLSX.utils.json_to_sheet(propias,{header:headers});
+      XLSX.utils.book_append_sheet(wb,ws,String(alyc).slice(0,31));
+      const nombre=`ORDENES_${alyc}_${fechaHoy()}.xlsx`;
+      XLSX.writeFile(wb,nombre);
+      log(`✅ ${nombre} — ${propias.length} órdenes`,'log-ok');
+    }, i*400);
+  });
 }
 
 function resetCompras() { compraTicker=null; compraCants={}; $('compraTickerInput').value=''; $('compraPrecioLabel').textContent=''; renderCompraChips(); renderCompras(); }
