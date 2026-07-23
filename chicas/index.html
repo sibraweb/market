@@ -767,6 +767,18 @@ async function fetchPrices() {
   log(`✅ Precios: ${total} tickers`,'log-ok');
 }
 
+// Tipo de cambio MEP = AL30 (pesos) / AL30D (dólares), igual que
+// actual/fetchMEP(). OJO: NO existe un ticker 'AL30/AL30D' en data912 —
+// pedir eso a getPrice devolvía null y el MEP caía a 1, con lo cual el
+// efectivo en USD_MEP valía casi $0 en la cartera (bug confirmado
+// 2026-07-23: a Silva Omar su saldo de US$1.698 le sumaba $1.698 en vez de
+// ~$2,6M y el % de cada ticker daba 10% en vez de ~8,9%). getPrice divide
+// ambos bonos por 100, así que el ratio no se ve afectado.
+function getMEP() {
+  const al30 = getPrice('AL30'), al30d = getPrice('AL30D');
+  return (al30 && al30d && al30d > 0) ? al30 / al30d : 1;
+}
+
 function getPrice(ticker) {
   // Try exact match first
   if(priceIndex[ticker]?.length) {
@@ -932,7 +944,7 @@ function getClienteCarteras(alyc, comitente) {
   let brutaUSD = 0;
 
   // MEP para conversión
-  const mep = getPrice('AL30/AL30D') || 1;
+  const mep = getMEP();
 
   posiciones.forEach(p => {
     if (p.alyc !== alyc || normCC(p.comitente) !== normCC(comitente)) return;
