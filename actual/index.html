@@ -2050,8 +2050,14 @@ function getPrice(ticker, tipo) {
 }
 
 function clasificarTicker(ticker, alloc) {
-  if (ticker === 'CASH_ARS') return 'CASH_ARS';
-  if (ticker === 'CASH_USD') return 'CASH_USD';
+  // Efectivo: SibraBrokers.loadTenencias() normaliza el ticker a estos 4
+  // canónicos (PESOS/USD_MEP/USD_DIVISA/USD_CABLE) — los nombres viejos
+  // CASH_ARS/CASH_USD ya no llegan acá (auditoría 2026-07-23: comparaban
+  // contra los viejos y todo el efectivo caía a DESCONOCIDO; no rompía la
+  // valuación porque manda market_value_ars del broker, pero DESCONOCIDO
+  // divide por 100 en getPrecioUnitario — bomba latente si falta valorBase).
+  if (ticker === 'PESOS') return 'CASH_ARS';
+  if (ticker === 'USD_MEP' || ticker === 'USD_DIVISA' || ticker === 'USD_CABLE') return 'CASH_USD';
   if (alloc) {
     const grupo    = (alloc.grupo    || '').toUpperCase().trim();
     const subgrupo = (alloc.subgrupo || '').toUpperCase().trim();
