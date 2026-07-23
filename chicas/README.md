@@ -41,6 +41,15 @@ tanto sobrestimaban el % de cada ticker):
    "Dólares exterior". Se agregó `isCashTicker()` (chequea contra los 4
    nombres canónicos) y se reemplazaron todas las comparaciones viejas.
 
+3. **El MEP era 1.** Aún con el bug 2 arreglado, el efectivo USD seguía
+   valiendo casi nada: la conversión usaba `getPrice('AL30/AL30D')` — un
+   ticker literal que NO existe en data912 → `null` → `mep = 1`. Nuevo
+   `getMEP()` = `AL30/AL30D` calculado desde los precios reales, mismo
+   método que `actual/fetchMEP()`. (Auditado 2026-07-23: `actual` y
+   `rotaciones` ya lo hacían bien — `rotaciones` además identifica el
+   efectivo por las banderas `esEfectivo`/`bucket` del loader compartido,
+   el patrón más robusto; ideal migrar `chicas` a eso en algún momento.)
+
 **Por qué `market/actual` nunca tuvo este bug**: no reconstruye el valor por
 ticker — suma directo `p.valor` (`market_value_ars`, ya calculado por el
 backend en `TENENCIAS.CURRENT`). `chicas` sí reconstruye con precio spot en
