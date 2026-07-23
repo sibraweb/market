@@ -303,26 +303,10 @@ th:hover { background:var(--bg4); }
       <button class="btn btn-primary" onclick="cargarTodo()">☁ Cargar todo</button>
     </div>
     <div class="drive-grid">
-      <div class="source-card" id="sc-adcap">
-        <div class="sc-title">ADCAP</div>
-        <div class="sc-file" id="sc-adcap-name">Google Sheets</div>
-        <div class="sc-status idle" id="sc-adcap-status"><span>●</span> Sin cargar</div>
-        <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
-        </div>
-      </div>
-      <div class="source-card" id="sc-ieb">
-        <div class="sc-title">IEB</div>
-        <div class="sc-file" id="sc-ieb-name">Google Sheets</div>
-        <div class="sc-status idle" id="sc-ieb-status"><span>●</span> Sin cargar</div>
-        <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
-        </div>
-      </div>
-      <div class="source-card" id="sc-bcch">
-        <div class="sc-title">BCCH</div>
-        <div class="sc-file" id="sc-bcch-name">Google Sheets</div>
-        <div class="sc-status idle" id="sc-bcch-status"><span>●</span> Sin cargar</div>
+      <div class="source-card" id="sc-tenencias">
+        <div class="sc-title">Tenencias (ADCAP+IEB+BCCH)</div>
+        <div class="sc-file" id="sc-tenencias-name">Google Sheets (TENENCIAS.CURRENT)</div>
+        <div class="sc-status idle" id="sc-tenencias-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
           <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
         </div>
@@ -810,7 +794,7 @@ function getPrice(ticker) {
 // por Excel de Drive por-ALyC — esos archivos ya no se suben a mano.
 async function cargarTenenciasSheet(fresh=false) {
   if(!token){alert('Conectá Drive primero');return;}
-  ['adcap','ieb','bcch'].forEach(k=>setStatus(k,'loading','Leyendo Sheet...'));
+  setStatus('tenencias','loading','Leyendo Sheet...');
   try {
     const filas=await SibraBrokers.loadTenencias({fresh});
     posiciones=posiciones.filter(p=>!['ADCAP','IEB','BCCH'].includes(p.alyc));
@@ -828,18 +812,14 @@ async function cargarTenenciasSheet(fresh=false) {
       const [b, acc] = key.split('|');
       caucionesPorCuenta[`${b}|${normCC(acc)}`] = cauc[key];
     }
-    ['ADCAP','IEB','BCCH'].forEach(alyc=>{
-      const key=alyc.toLowerCase();
-      const n=posiciones.filter(p=>p.alyc===alyc).length;
-      $(`sc-${key}-name`).textContent='Google Sheets (TENENCIAS.CURRENT)';
-      setStatus(key, n? 'ok':'error', n? `${n} posiciones` : 'Sin posiciones');
-    });
+    const resumen=['ADCAP','IEB','BCCH'].map(alyc=>`${posiciones.filter(p=>p.alyc===alyc).length} ${alyc}`).join(' · ');
+    setStatus('tenencias', filas.length? 'ok':'error', filas.length? resumen : 'Sin posiciones');
     log(`✅ Tenencias: ${filas.length} posiciones (ADCAP+IEB+BCCH)`,'log-ok');
     actualizarSelectores();
     $('kpiPos').textContent=posiciones.length;
     $('kpiRow').style.display='';
   } catch(e){
-    ['adcap','ieb','bcch'].forEach(k=>setStatus(k,'error','Error: '+e.message));
+    setStatus('tenencias','error','Error: '+e.message);
     log('❌ Tenencias: '+e.message,'log-err');
   }
 }
