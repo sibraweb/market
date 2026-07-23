@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.log
+
+# Secretos — nunca al repo
+.env
+credentials.json
+token.pickle*
+service_account*.json
+
+# Bases locales (regenerables, no versionar)
+*.db
+*.sqlite3
