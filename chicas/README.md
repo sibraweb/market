@@ -50,6 +50,19 @@ tanto sobrestimaban el % de cada ticker):
    efectivo por las banderas `esEfectivo`/`bucket` del loader compartido,
    el patrón más robusto; ideal migrar `chicas` a eso en algún momento.)
 
+## Features agregadas 2026-07-23
+
+- **Exportar Excel**: dos botones en los headers de VENTA/COMPRA —
+  "Exportar Excel" (un archivo, una hoja por ALyC) y "Excel por ALyC" (un
+  archivo por mesa, para adjuntar en cada grupo). Toman todas las órdenes
+  armadas (ventas+compras, cantidades tal cual editadas, ignorando los
+  filtros por ALyC). Columna "Enviado WA" distingue lo ya mandado.
+- **Mensaje WA con Monto estimado**: plantilla única `formatOrden()`
+  (formato GrowCap: CC arriba, monto estimado = cantidad × spot, firma
+  "GrowCap by SIBRATECH").
+- **Tarjeta de tenencias unificada**: las 3 cards ADCAP/IEB/BCCH eran la
+  misma fuente (`TENENCIAS.CURRENT`) con el mismo botón — ahora es una.
+
 **Por qué `market/actual` nunca tuvo este bug**: no reconstruye el valor por
 ticker — suma directo `p.valor` (`market_value_ars`, ya calculado por el
 backend en `TENENCIAS.CURRENT`). `chicas` sí reconstruye con precio spot en
