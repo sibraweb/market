@@ -100,6 +100,28 @@ const SibraBrokers = (() => {
     return escala && escala !== 1 ? p / escala : p;
   }
 
+  // Snapshot CURRENT: Supabase primero (espejo brokers_* que pisa el backend
+  // en cada ciclo, login de sibra-maestros.js), fallback a Sheets legacy si
+  // Supabase no está disponible/da vacío. Mismas columnas en ambas fuentes.
+  async function snapshotRows(table, sheetId, opts = {}) {
+    if (typeof SibraMaestros !== 'undefined') {
+      const cacheKey = `brokers_sb_${table}`;
+      if (!opts.fresh) {
+        const cached = SibraCache.get(cacheKey, TTL);
+        if (cached) return cached;
+      } else SibraCache.invalidate(cacheKey);
+      try {
+        const rows = await SibraMaestros.selectAll(table);
+        if (rows.length) { SibraCache.set(cacheKey, rows); return rows; }
+        console.warn(`[SibraBrokers] ${table} vacía en Supabase — fallback a Sheets`);
+      } catch (e) {
+        console.warn(`[SibraBrokers] Supabase ${table} falló — fallback a Sheets:`, e.message);
+      }
+    }
+    const data = await sheetValues(sheetId, 'CURRENT', opts);
+    return rowsFromValues(data.values);
+  }
+
   async function sheetValues(sheetId, range, { fresh = false } = {}) {
     const token = SibraAuth.getToken();
     if (!token) throw new Error('No hay sesión de Google. Conectate primero.');
@@ -124,10 +146,10 @@ const SibraBrokers = (() => {
     return values.slice(1).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] ?? ''])));
   }
 
-  // Posiciones normalizadas desde TENENCIAS.CURRENT (BCCH/IEB/ADCAP, efectivo incluido).
+  // Posiciones normalizadas desde brokers_tenencias/TENENCIAS.CURRENT (BCCH/IEB/ADCAP, efectivo incluido).
   async function loadTenencias(opts = {}) {
-    const data = await sheetValues(TENENCIAS_SHEET_ID, 'CURRENT', opts);
-    return rowsFromValues(data.values).map(r => {
+    const rows = await snapshotRows('brokers_tenencias', TENENCIAS_SHEET_ID, opts);
+    return rows.map(r => {
       const cash = normalizeCash(r.ticker);
       return {
         alyc: r.broker_code,
@@ -151,8 +173,7 @@ const SibraBrokers = (() => {
 
   // Cauciones crudas + helper de caución tomadora vigente por cuenta.
   async function loadCauciones(opts = {}) {
-    const data = await sheetValues(CAUCIONES_SHEET_ID, 'CURRENT', opts);
-    const rows = rowsFromValues(data.values);
+    const rows = await snapshotRows('brokers_cauciones', CAUCIONES_SHEET_ID, opts);
     // { 'ALYC|comitente': { ars, usd } } — sólo VIGENTE + TOMADORA (lo que suma a la bruta).
     function caucionByAccount() {
       const m = {};

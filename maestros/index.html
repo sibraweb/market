@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIBRA · Maestros</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="../shared/sibra-cache.js"></script>
+<script src="../shared/sibra-maestros.js"></script>
+<style>
+:root {
+  --red: #E10600; --red-dark: #B00500; --red-light: #ff3330;
+  --bg: #0d0d0d; --bg2: #141414; --bg3: #1a1a1a; --bg4: #222222;
+  --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+  --text: #f0f0f0; --text2: #a0a0a0; --text3: #555;
+  --green: #22c55e; --amber: #f59e0b; --blue: #3b82f6;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Montserrat',sans-serif; font-size:13px; min-height:100vh; }
+.app-header { background:var(--bg2); border-bottom:2px solid var(--red); padding:0 24px; height:52px; display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:100; }
+.logo { font-family:'Raleway',sans-serif; font-weight:700; font-size:18px; letter-spacing:2px; color:var(--red); }
+.logo span { color:var(--text); font-weight:300; }
+.header-sep { flex:1; }
+.back-btn { background:transparent; border:1px solid var(--border2); color:var(--text2); padding:5px 12px; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; transition:all .2s; }
+.back-btn:hover { border-color:var(--red); color:var(--red-light); }
+.sb-status { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); }
+.sb-dot { width:7px; height:7px; border-radius:50%; background:var(--text3); }
+.sb-dot.connected { background:var(--green); }
+.btn-sb { background:transparent; border:1px solid var(--border2); color:var(--text2); padding:5px 14px; border-radius:4px; cursor:pointer; font-family:'Montserrat',sans-serif; font-size:12px; font-weight:500; transition:all .15s; }
+.btn-sb:hover { border-color:var(--red); color:var(--red); }
+.btn-sb.connected { border-color:var(--green); color:var(--green); }
+.nav-tabs { background:var(--bg2); border-bottom:1px solid var(--border); padding:0 24px; display:flex; }
+.nav-tab { padding:12px 22px; cursor:pointer; font-size:12px; font-weight:500; color:var(--text3); border-bottom:2px solid transparent; transition:all .15s; letter-spacing:.04em; }
+.nav-tab:hover { color:var(--text2); }
+.nav-tab.active { color:var(--red); border-bottom-color:var(--red); }
+.main { max-width:1280px; margin:0 auto; padding:24px 20px 80px; }
+.panel { display:none; } .panel.active { display:block; }
+.hero { margin-bottom:18px; }
+.hero h1 { font-size:20px; font-weight:700; margin-bottom:4px; }
+.hero p { color:var(--text2); font-size:12px; max-width:760px; }
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+.toolbar .spacer { flex:1; }
+.btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:6px; cursor:pointer; border:none; font-family:'Montserrat',sans-serif; font-size:12px; font-weight:600; transition:all .15s; white-space:nowrap; }
+.btn-primary { background:var(--red); color:#fff; }
+.btn-primary:hover { background:var(--red-dark); }
+.btn-secondary { background:transparent; border:1px solid var(--border2); color:var(--text2); }
+.btn-secondary:hover { border-color:var(--text2); color:var(--text); }
+.btn-green { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.3); color:var(--green); }
+.btn-green:hover { background:rgba(34,197,94,.2); }
+input[type=text], select { background:var(--bg3); border:1px solid var(--border2); border-radius:6px; color:var(--text); padding:8px 12px; font-family:'Montserrat',sans-serif; font-size:12px; outline:none; }
+input[type=text]:focus { border-color:var(--red); }
+.pill { font-size:11px; color:var(--text2); background:var(--bg3); border:1px solid var(--border); border-radius:20px; padding:5px 12px; }
+.pill b { color:var(--text); }
+.pill.warn { color:var(--amber); border-color:rgba(245,158,11,.4); }
+.pill.ok { color:var(--green); border-color:rgba(34,197,94,.3); }
+.table-wrap { background:var(--bg2); border:1px solid var(--border2); border-radius:10px; overflow:auto; max-height:70vh; }
+table { border-collapse:collapse; width:100%; }
+th { position:sticky; top:0; background:var(--bg3); font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text2); text-align:left; padding:9px 10px; border-bottom:1px solid var(--border2); z-index:2; }
+td { padding:0; border-bottom:1px solid var(--border); font-size:12px; }
+td[contenteditable] { padding:7px 10px; outline:none; min-width:60px; }
+td[contenteditable]:focus { background:rgba(225,6,0,.08); }
+td.ro { padding:7px 10px; color:var(--text2); }
+tr.dirty td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
+.del-btn { background:none; border:none; color:var(--text3); cursor:pointer; font-size:13px; padding:6px 10px; }
+.del-btn:hover { color:var(--red); }
+.muted { color:var(--text3); font-size:11px; }
+.log { margin-top:12px; background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:11px; max-height:150px; overflow:auto; display:none; }
+.log div { padding:2px 0; }
+.log-ok { color:var(--green); } .log-err { color:var(--red-light); } .log-warn { color:var(--amber); }
+.sums { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <div class="logo">SIBRA<span> · Maestros</span></div>
+  <a href="../" class="back-btn">← Market Suite</a>
+  <div class="header-sep"></div>
+  <div class="sb-status"><div class="sb-dot" id="sbDot"></div><span id="sbLabel">Sin sesión</span></div>
+  <button class="btn-sb" id="btnSb" onclick="App.toggleSesion()">Entrar</button>
+</header>
+<nav class="nav-tabs">
+  <div class="nav-tab active" data-tab="papeles">Papeles (clasificación)</div>
+  <div class="nav-tab" data-tab="modelos">Carteras objetivo</div>
+  <div class="nav-tab" data-tab="clientes">Clientes</div>
+</nav>
+<main class="main">
+
+<section class="panel active" id="panel-papeles">
+  <div class="hero"><h1>Maestro PAPELES — clasificación de activos</h1>
+  <p>Fuente única en la base (Supabase, tabla <code>market_papeles</code>). Todos los módulos leen de acá. <b>Guardar reemplaza la tabla completa</b> con lo que está en pantalla.</p></div>
+  <div class="toolbar">
+    <button class="btn btn-secondary" onclick="App.recargar('papeles')">↻ Recargar</button>
+    <button class="btn btn-secondary" onclick="App.agregarFila('papeles')">+ Fila</button>
+    <button class="btn btn-secondary" onclick="App.importar('papeles')">↑ Importar Excel</button>
+    <button class="btn btn-secondary" onclick="App.exportar('papeles')">↓ Exportar Excel</button>
+    <button class="btn btn-primary" onclick="App.guardar('papeles')">💾 Guardar en base</button>
+    <div class="spacer"></div>
+    <input type="text" id="qPapeles" placeholder="Filtrar símbolo / grupo / sector..." oninput="App.render('papeles')" style="min-width:240px">
+    <span class="pill" id="cntPapeles">—</span>
+  </div>
+  <div class="table-wrap" id="tblPapeles"></div>
+  <p class="muted" style="margin-top:8px">Se muestran hasta 300 filas (usá el filtro). La edición y el guardado operan sobre la tabla completa.</p>
+</section>
+
+<section class="panel" id="panel-modelos">
+  <div class="hero"><h1>Carteras objetivo (modelo por perfil y plazo)</h1>
+  <p>Ponderación <b>dentro del plazo</b> (LARGO/MEDIANO/CORTO/CASH deben sumar 100% cada uno si tienen posiciones). Tabla <code>market_modelos</code>. Se modifica todo el tiempo: guardar pisa lo anterior.</p></div>
+  <div class="toolbar">
+    <select id="selPerfil" onchange="App.render('modelos')">
+      <option value="">Todos los perfiles</option>
+      <option>AGRESIVO</option><option>MODERADO</option><option>CONSERVADOR</option>
+    </select>
+    <button class="btn btn-secondary" onclick="App.recargar('modelos')">↻ Recargar</button>
+    <button class="btn btn-secondary" onclick="App.agregarFila('modelos')">+ Fila</button>
+    <button class="btn btn-secondary" onclick="App.importar('modelos')">↑ Importar Excel</button>
+    <button class="btn btn-secondary" onclick="App.exportar('modelos')">↓ Exportar Excel</button>
+    <button class="btn btn-primary" onclick="App.guardar('modelos')">💾 Guardar en base</button>
+    <div class="spacer"></div>
+    <span class="pill" id="cntModelos">—</span>
+  </div>
+  <div class="sums" id="sumsModelos"></div>
+  <div class="table-wrap" id="tblModelos"></div>
+</section>
+
+<section class="panel" id="panel-clientes">
+  <div class="hero"><h1>Maestro de clientes</h1>
+  <p>Alta de clientes, perfil y composición de cartera (LP/MP/CP/CASH/PALANCA) de cada cuenta. Clave <b>ALyC + comitente</b> — el número se repite entre brokers. Tabla <code>market_clientes</code>. Las cauciones NO van acá: vienen solas de la base de brokers.</p></div>
+  <div class="toolbar">
+    <button class="btn btn-secondary" onclick="App.recargar('clientes')">↻ Recargar</button>
+    <button class="btn btn-secondary" onclick="App.agregarFila('clientes')">+ Fila</button>
+    <button class="btn btn-secondary" onclick="App.importar('clientes')">↑ Importar Excel</button>
+    <button class="btn btn-secondary" onclick="App.exportar('clientes')">↓ Exportar Excel</button>
+    <button class="btn btn-primary" onclick="App.guardar('clientes')">💾 Guardar en base</button>
+    <div class="spacer"></div>
+    <input type="text" id="qClientes" placeholder="Filtrar cliente / cc / alyc..." oninput="App.render('clientes')" style="min-width:220px">
+    <span class="pill" id="cntClientes">—</span>
+  </div>
+  <div class="table-wrap" id="tblClientes"></div>
+</section>
+
+<div id="log" class="log"></div>
+<input type="file" id="fileInput" accept=".xlsx,.xls,.xlsm" style="display:none">
+</main>
+
+<script>
+const App = (() => {
+  const $ = id => document.getElementById(id);
+  const S = { papeles: [], modelos: [], clientes: [], dirty: { papeles:false, modelos:false, clientes:false } };
+
+  // columnas: [campo, etiqueta, numérica]
+  const COLS = {
+    papeles: [
+      ['simbolo','SIMBOLO'],['subgrupo','SUBGRUPO'],['grupo','GRUPO'],['pais','PAIS'],
+      ['moneda','MONEDA'],['subtipo','SUBTIPO'],['sector','SECTOR'],['industria','INDUSTRIA'],
+      ['vto','VTO.'],['moneda_cartera','MONEDA DE CARTERA'],
+    ],
+    modelos: [
+      ['perfil','PERFIL'],['plazo','PLAZO'],['ticker','TICKER'],
+      ['ponderacion','PONDERACIÓN %',true],['precio_ref','PRECIO REF',true],
+    ],
+    clientes: [
+      ['alyc','ALYC'],['cc','CC'],['cliente','CLIENTE'],['cuit','CUIT'],['perfil','PERFIL'],
+      ['monto','MONTO',true],['lp','LP',true],['mp','MP',true],['cp','CP',true],['cash','CASH',true],
+      ['palanca','PALANCA',true],['cartera','CARTERA',true],['total','TOTAL',true],
+    ],
+  };
+
+  function log(msg, cls='') {
+    const el = $('log'); el.style.display = 'block';
+    el.innerHTML += `<div class="${cls}">${msg}</div>`; el.scrollTop = el.scrollHeight;
+  }
+
+  function num(v) {
+    if (typeof v === 'number') return v;
+    let s = String(v ?? '').trim().replace(/%/g,'').replace(/\$/g,'').replace(/\s/g,'');
+    if (!s) return 0;
+    if (s.includes(',') && s.includes('.')) s = s.replace(/\./g,'').replace(',','.');
+    else s = s.replace(',','.');
+    const n = Number(s); return isFinite(n) ? n : 0;
+  }
+
+  // ── Sesión ──
+  function updateSesionUI() {
+    const email = SibraMaestros.sessionEmail();
+    $('sbDot').className = 'sb-dot' + (email ? ' connected' : '');
+    $('sbLabel').textContent = email || 'Sin sesión';
+    $('btnSb').textContent = email ? 'Salir' : 'Entrar';
+    $('btnSb').className = 'btn-sb' + (email ? ' connected' : '');
+  }
+  async function toggleSesion() {
+    if (SibraMaestros.sessionEmail()) { SibraMaestros.logout(); updateSesionUI(); return; }
+    try { await SibraMaestros.ensureLogin(); updateSesionUI(); cargarTodo(); }
+    catch (e) { log('❌ ' + e.message, 'log-err'); }
+  }
+
+  // ── Carga ──
+  async function recargar(key, fresh = true) {
+    try {
+      if (S.dirty[key] && fresh && !confirm('Hay cambios sin guardar en ' + key + '. ¿Descartar y recargar?')) return;
+      const load = { papeles: SibraMaestros.papeles, modelos: SibraMaestros.modelos, clientes: SibraMaestros.clientes }[key];
+      S[key] = (await load({ fresh })).map(r => ({ ...r }));
+      S.dirty[key] = false;
+      render(key);
+      log(`✅ ${key}: ${S[key].length} filas desde la base`, 'log-ok');
+    } catch (e) { log(`❌ ${key}: ${e.message}`, 'log-err'); }
+  }
+  async function cargarTodo() {
+    updateSesionUI();
+    await recargar('papeles', false);
+    await recargar('modelos', false);
+    await recargar('clientes', false);
+  }
+
+  // ── Render ──
+  function filtro(key) {
+    if (key === 'papeles') {
+      const q = ($('qPapeles').value || '').trim().toUpperCase();
+      if (!q) return S.papeles;
+      return S.papeles.filter(r => `${r.simbolo} ${r.subgrupo} ${r.grupo} ${r.pais} ${r.sector} ${r.industria}`.toUpperCase().includes(q));
+    }
+    if (key === 'modelos') {
+      const p = $('selPerfil').value;
+      return p ? S.modelos.filter(r => r.perfil === p) : S.modelos;
+    }
+    const q = ($('qClientes').value || '').trim().toUpperCase();
+    if (!q) return S.clientes;
+    return S.clientes.filter(r => `${r.cliente} ${r.cc} ${r.alyc} ${r.perfil}`.toUpperCase().includes(q));
+  }
+
+  function render(key) {
+    const cols = COLS[key];
+    const all = S[key];
+    let rows = filtro(key);
+    const truncado = key === 'papeles' && rows.length > 300;
+    if (truncado) rows = rows.slice(0, 300);
+    const tblId = { papeles:'tblPapeles', modelos:'tblModelos', clientes:'tblClientes' }[key];
+    const cnt = { papeles:'cntPapeles', modelos:'cntModelos', clientes:'cntClientes' }[key];
+    $(cnt).innerHTML = `<b>${all.length}</b> filas` + (S.dirty[key] ? ' · <span style="color:var(--amber)">sin guardar</span>' : '');
+    const head = '<tr>' + cols.map(c => `<th>${c[1]}</th>`).join('') + '<th></th></tr>';
+    const body = rows.map(r => {
+      const idx = all.indexOf(r);
+      return '<tr>' + cols.map(([f,,isNum]) => {
+        let v = r[f] ?? '';
+        if (f === 'ponderacion') v = (num(v) * 100).toFixed(2);
+        return `<td contenteditable data-i="${idx}" data-f="${f}" data-n="${isNum?1:''}">${v}</td>`;
+      }).join('') + `<td><button class="del-btn" onclick="App.borrarFila('${key}',${idx})">✕</button></td></tr>`;
+    }).join('');
+    $(tblId).innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>` +
+      (truncado ? '<div class="muted" style="padding:10px 14px">… más filas ocultas, afiná el filtro</div>' : '');
+    $(tblId).querySelectorAll('td[contenteditable]').forEach(td => {
+      td.addEventListener('input', () => {
+        const r = all[Number(td.dataset.i)]; if (!r) return;
+        let v = td.textContent.trim();
+        if (td.dataset.f === 'ponderacion') r[td.dataset.f] = num(v) / 100;
+        else if (td.dataset.n) r[td.dataset.f] = num(v);
+        else r[td.dataset.f] = v;
+        if (!S.dirty[key]) { S.dirty[key] = true; $(cnt).innerHTML = `<b>${all.length}</b> filas · <span style="color:var(--amber)">sin guardar</span>`; }
+        if (key === 'modelos') renderSums();
+      });
+    });
+    if (key === 'modelos') renderSums();
+  }
+
+  function renderSums() {
+    const m = {};
+    S.modelos.forEach(r => {
+      const k = `${r.perfil} · ${r.plazo}`;
+      m[k] = (m[k] || 0) + num(r.ponderacion);
+    });
+    $('sumsModelos').innerHTML = Object.entries(m).sort().map(([k, s]) => {
+      const pct = (s * 100).toFixed(1);
+      const ok = Math.abs(s - 1) < 0.005;
+      return `<span class="pill ${ok ? 'ok' : 'warn'}">${k}: <b>${pct}%</b>${ok ? '' : ' ⚠'}</span>`;
+    }).join('') || '<span class="muted">Sin posiciones</span>';
+  }
+
+  // ── Edición ──
+  function agregarFila(key) {
+    const base = {
+      papeles: { simbolo:'', subgrupo:'', grupo:'', pais:'', moneda:'', subtipo:'', sector:'', industria:'', vto:'', moneda_cartera:'' },
+      modelos: { perfil: $('selPerfil').value || 'AGRESIVO', plazo:'LARGO', ticker:'', ponderacion:0, precio_ref:null },
+      clientes: { alyc:'', cc:'', cliente:'', cuit:'', perfil:'AGRESIVO', monto:0, lp:0, mp:0, cp:0, cash:0, palanca:1, cartera:0, total:0 },
+    }[key];
+    S[key].unshift(base); S.dirty[key] = true; render(key);
+  }
+  function borrarFila(key, idx) {
+    S[key].splice(idx, 1); S.dirty[key] = true; render(key);
+  }
+
+  // ── Guardar (reemplazo total) ──
+  function limpiar(key) {
+    const upper = v => String(v ?? '').trim().toUpperCase();
+    if (key === 'papeles') {
+      const seen = new Set();
+      return S.papeles.map(r => ({ ...r, simbolo: upper(r.simbolo), updated_at: undefined }))
+        .filter(r => r.simbolo && !seen.has(r.simbolo) && seen.add(r.simbolo))
+        .map(({ updated_at, ...r }) => r);
+    }
+    if (key === 'modelos') {
+      const seen = new Set();
+      return S.modelos.map(r => ({
+        perfil: upper(r.perfil), plazo: upper(r.plazo), ticker: upper(r.ticker),
+        ponderacion: num(r.ponderacion), precio_ref: r.precio_ref === null || r.precio_ref === '' ? null : num(r.precio_ref),
+      })).filter(r => {
+        const k = `${r.perfil}|${r.plazo}|${r.ticker}`;
+        return r.perfil && r.plazo && r.ticker && !seen.has(k) && seen.add(k);
+      });
+    }
+    const seen = new Set();
+    return S.clientes.map(({ updated_at, ...r }) => ({
+      ...r, alyc: upper(r.alyc), cc: String(r.cc ?? '').trim(), perfil: upper(r.perfil) || 'AGRESIVO',
+    })).filter(r => {
+      const k = `${r.alyc}|${r.cc}`;
+      return r.alyc && r.cc && !seen.has(k) && seen.add(k);
+    });
+  }
+
+  async function guardar(key) {
+    try {
+      const rows = limpiar(key);
+      if (!rows.length && !confirm('La tabla quedaría VACÍA en la base. ¿Seguro?')) return;
+      if (!confirm(`Se reemplaza la tabla completa en la base con ${rows.length} filas. ¿Confirmar?`)) return;
+      const tabla = { papeles:'market_papeles', modelos:'market_modelos', clientes:'market_clientes' }[key];
+      const n = await SibraMaestros.replaceTable(tabla, rows);
+      S.dirty[key] = false;
+      log(`💾 ${tabla}: ${n} filas guardadas (reemplazo total)`, 'log-ok');
+      await recargar(key, true);
+    } catch (e) { log(`❌ Guardar ${key}: ${e.message}`, 'log-err'); }
+  }
+
+  // ── Import / Export Excel ──
+  function importar(key) {
+    const input = $('fileInput');
+    input.onchange = async () => {
+      const file = input.files[0]; if (!file) return;
+      try {
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        const parse = { papeles: importPapeles, modelos: importModelos, clientes: importClientes }[key];
+        const n = parse(wb);
+        S.dirty[key] = true; render(key);
+        log(`↑ ${file.name}: ${n} filas importadas a ${key} (falta Guardar)`, 'log-warn');
+      } catch (e) { log(`❌ Importar: ${e.message}`, 'log-err'); }
+      input.value = '';
+    };
+    input.click();
+  }
+
+  function importPapeles(wb) {
+    const ws = wb.Sheets['PAPELES'] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    const out = {};
+    rows.forEach(r => {
+      const sym = String(r.SIMBOLO || r.Simbolo || r.simbolo || '').trim().toUpperCase();
+      if (!sym) return;
+      out[sym] = {
+        simbolo: sym, subgrupo: String(r.SUBGRUPO||'').trim(), grupo: String(r.GRUPO||'').trim(),
+        pais: String(r.PAIS||'').trim(), moneda: String(r.MONEDA||'').trim(), subtipo: String(r.SUBTIPO||'').trim(),
+        sector: String(r.SECTOR||'').trim(), industria: String(r.INDUSTRIA||'').trim(),
+        vto: String(r['VTO.']||r.VTO||'').trim(), moneda_cartera: String(r['MONEDA DE CARTERA']||'').trim(),
+      };
+    });
+    S.papeles = Object.values(out);
+    return S.papeles.length;
+  }
+
+  // Formato "Cartera SIBRA.xlsx": hojas AGRESIVO/MODERADO/CONSERVADOR con
+  // header PLAZO | ... | PAPEL | PONDERACION EN PLAZO; el plazo se arrastra
+  // en filas de continuación. También acepta un export plano de este módulo.
+  function importModelos(wb) {
+    const PLAZOS = ['LARGO','MEDIANO','CORTO','CASH','PALANCA'];
+    const out = {};
+    const perfiles = wb.SheetNames.filter(n => /AGRES|MODER|CONSERV/i.test(n));
+    if (perfiles.length) {
+      perfiles.forEach(name => {
+        const perfil = /AGRES/i.test(name) ? 'AGRESIVO' : /MODER/i.test(name) ? 'MODERADO' : 'CONSERVADOR';
+        const m = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+        const hIdx = m.findIndex(r => String(r[0]).trim().toUpperCase() === 'PLAZO' && String(r[2]).trim().toUpperCase() === 'PAPEL');
+        if (hIdx < 0) return;
+        let plazo = null;
+        for (let i = hIdx + 1; i < m.length; i++) {
+          const c0 = String(m[i][0] || '').trim().toUpperCase();
+          if (PLAZOS.includes(c0)) plazo = c0;
+          const ticker = String(m[i][2] || '').trim().toUpperCase();
+          if (!ticker || !plazo || plazo === 'PALANCA') continue;
+          let p = m[i][3];
+          const esPct = typeof p === 'string' && p.includes('%');
+          p = num(p);
+          if (esPct || p > 1) p = p / 100;
+          out[`${perfil}|${plazo}|${ticker}`] = { perfil, plazo, ticker, ponderacion: p, precio_ref: null };
+        }
+      });
+    } else {
+      // export plano: columnas PERFIL/PLAZO/TICKER/PONDERACION
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+      rows.forEach(r => {
+        const perfil = String(r.PERFIL||r.perfil||'').trim().toUpperCase();
+        const plazo = String(r.PLAZO||r.plazo||'').trim().toUpperCase();
+        const ticker = String(r.TICKER||r.ticker||'').trim().toUpperCase();
+        if (!perfil || !plazo || !ticker) return;
+        let p = num(r.PONDERACION ?? r['PONDERACIÓN %'] ?? r.ponderacion);
+        if (p > 1) p = p / 100;
+        out[`${perfil}|${plazo}|${ticker}`] = { perfil, plazo, ticker, ponderacion: p, precio_ref: num(r.PRECIO_REF ?? r['PRECIO REF']) || null };
+      });
+    }
+    S.modelos = Object.values(out);
+    return S.modelos.length;
+  }
+
+  // Formato "Tabla de Clientes.xlsx" (posicional) o export de este módulo (por nombre)
+  function importClientes(wb) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const normCC = v => { const n = parseFloat(String(v).trim()); return isFinite(n) ? String(Math.round(n)) : String(v).trim(); };
+    const out = {};
+    rows.forEach(r => {
+      const g = (...ks) => { for (const k of ks) { const kk = Object.keys(r).find(x => x.trim().toLowerCase() === k.toLowerCase()); if (kk && r[kk] !== '') return r[kk]; } return ''; };
+      const cc = normCC(g('cc','ccc','cuenta','comitente'));
+      const alyc = String(g('alyc')).trim().toUpperCase();
+      if (!cc || !alyc) return;
+      out[`${alyc}|${cc}`] = {
+        alyc, cc, cliente: String(g('cliente')).trim(), cuit: String(g('cuit')).trim(),
+        perfil: String(g('perfil')).trim().toUpperCase() || 'AGRESIVO',
+        monto: num(g('monto')), lp: num(g('lp')), mp: num(g('mp')), cp: num(g('cp')), cash: num(g('cash')),
+        palanca: num(g('palanca')) || 1, cartera: num(g('cartera')), total: num(g('total')),
+      };
+    });
+    S.clientes = Object.values(out);
+    return S.clientes.length;
+  }
+
+  function exportar(key) {
+    const cols = COLS[key];
+    const rows = S[key].map(r => {
+      const o = {};
+      cols.forEach(([f, label]) => { o[label] = f === 'ponderacion' ? num(r[f]) : (r[f] ?? ''); });
+      return o;
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), key.toUpperCase());
+    XLSX.writeFile(wb, `maestro_${key}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  }
+
+  // ── Init ──
+  function initNav() {
+    document.querySelectorAll('.nav-tab').forEach(t => t.addEventListener('click', () => {
+      document.querySelectorAll('.nav-tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      t.classList.add('active'); $('panel-' + t.dataset.tab).classList.add('active');
+    }));
+  }
+  function init() {
+    initNav(); updateSesionUI();
+    document.addEventListener('sibra-maestros-login', updateSesionUI);
+    if (SibraMaestros.sessionEmail()) cargarTodo();
+  }
+  window.addEventListener('beforeunload', e => {
+    if (S.dirty.papeles || S.dirty.modelos || S.dirty.clientes) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  return { init, toggleSesion, recargar, render, agregarFila, borrarFila, guardar, importar, exportar };
+})();
+document.addEventListener('DOMContentLoaded', App.init);
+</script>
+</body>
+</html>

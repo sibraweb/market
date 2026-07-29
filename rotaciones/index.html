@@ -9,6 +9,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
+<script src="../shared/sibra-maestros.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -537,78 +538,44 @@ const Precios = {
 // ══════════════════════════════════════════════════════
 const Datos = {
   // ── Clientes ─────────────────────────────────────────
+  //    Maestro en Supabase (market_clientes, se edita en ../maestros/).
+  //    activo = cartera ≠ 0 (antes: columna "Cartera" no vacía del Excel).
+  //    Las cauciones NO están en el maestro: vienen de SibraBrokers.
   async cargarClientes(){
-    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_CLIENTES);
-    const xlsx = archivos.find(f=>f.name.toLowerCase().includes("clientes"));
-    if(!xlsx) throw new Error("No se encontró archivo de clientes en Drive");
-    const buf  = await Drive.bajar(xlsx.id);
-    const hojas = Drive.leerXlsx(buf);
-    const rows  = hojas[Object.keys(hojas)[0]] || [];
-    // Fila 0 = headers
-    S.clientes = rows.slice(1)
-      .filter(r => String(r[0]||"").trim() && String(r[3]||"").trim())
-      .map(r => ({
-        cc:      String(r[0]||"").trim(),
-        cliente: String(r[1]||"").trim(),
-        cuit:    String(r[2]||"").trim(),
-        alyc:    String(r[3]||"").trim().toUpperCase(),
-        monto:   parseFloat(String(r[4]||"0").replace(/[$,\s]/g,""))||0,
-        perfil:  String(r[5]||"AGRESIVO").trim().toUpperCase(),
-        LP:      normPct(r[6]),
-        MP:      normPct(r[7]),
-        CP:      normPct(r[8]),
-        CASH:    normPct(r[9]),
-        palanca: normPct(r[10]),
-        activo:  String(r[11]||"").trim() !== "",
-        caucionPesosFijo:   parseFloat(String(r[13]||"0").replace(/[$,\s]/g,""))||0,
-        caucionDolaresFijo: parseFloat(String(r[14]||"0").replace(/[$,\s]/g,""))||0,
+    const rows = await SibraMaestros.clientes();
+    S.clientes = rows.map(c => ({
+        cc:      String(c.cc),
+        cliente: c.cliente,
+        cuit:    c.cuit,
+        alyc:    c.alyc,
+        monto:   Number(c.monto)||0,
+        perfil:  c.perfil || "AGRESIVO",
+        LP:      Number(c.lp)||0,
+        MP:      Number(c.mp)||0,
+        CP:      Number(c.cp)||0,
+        CASH:    Number(c.cash)||0,
+        palanca: Number(c.palanca)||0,
+        activo:  Number(c.cartera) !== 0,
       }))
       .filter(c => c.activo && CFG.ALYCS_SOPORTADAS.includes(c.alyc));
-    console.log("[Clientes]",S.clientes.length,"cargados");
+    console.log("[Clientes]",S.clientes.length,"cargados (Supabase)");
     return S.clientes;
   },
 
   // ── Carteras modelo ───────────────────────────────────
+  //    Maestro en Supabase (market_modelos, se edita en ../maestros/).
+  //    ponderacion = fracción dentro del plazo (misma semántica que pond_plazo).
   async cargarCarteras(){
-    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_PAPELES);
-    const xlsx = archivos[0];
-    if(!xlsx) throw new Error("No se encontró archivo de carteras en Drive");
-    const buf   = await Drive.bajar(xlsx.id);
-    const hojas = Drive.leerXlsx(buf);
-    S.carteras  = {AGRESIVO:[], MODERADO:[], CONSERVADOR:[]};
-
-    // La hoja correcta se llama "CARTERA"
-    // Estructura: col0=PLAZO, col1=PONDERACION, col2=PAPEL, col6=PERFIL
-    // Fila 3 (índice 2) = headers, datos desde fila 4 (índice 3)
-    const nombreHoja = Object.keys(hojas).find(n=>n.toUpperCase()==="CARTERA") || Object.keys(hojas)[0];
-    const rows = hojas[nombreHoja] || [];
-
-    // Encontrar fila de headers buscando "PLAZO"
-    let dataStart = 3; // default
-    for(let i=0;i<Math.min(10,rows.length);i++){
-      const r = rows[i].map(v=>String(v||"").toUpperCase());
-      if(r[0]==="PLAZO" && r[2]==="PAPEL"){ dataStart=i+1; break; }
-    }
-
-    for(let i=dataStart; i<rows.length; i++){
-      const row    = rows[i];
-      const plazo  = String(row[0]||"").trim().toUpperCase();
-      const pond   = parseFloat(row[1])||0;   // PONDERACION EN CARTERA (decimal)
-      const papel  = String(row[2]||"").trim().toUpperCase();
-      const perfil = String(row[6]||"").trim().toUpperCase();
-
-      // Saltar filas inválidas o PALANCA
-      if(!plazo||!papel||!perfil) continue;
-      if(plazo==="PALANCA") continue;         // la caución tomadora no es posición a comprar
-      if(pond<=0) continue;
-      if(!(perfil in S.carteras)) continue;
-
-      S.carteras[perfil].push({ plazo, ticker: papel, pond_plazo: pond });
-    }
-
-    // Log diagnóstico
+    const rows = await SibraMaestros.modelos();
+    S.carteras = {AGRESIVO:[], MODERADO:[], CONSERVADOR:[]};
+    rows.forEach(r => {
+      if(!(r.perfil in S.carteras)) return;
+      const pond = Number(r.ponderacion)||0;
+      if(pond<=0) return;
+      S.carteras[r.perfil].push({ plazo:r.plazo, ticker:r.ticker, pond_plazo:pond });
+    });
     for(const p of ["AGRESIVO","MODERADO","CONSERVADOR"]){
-      console.log(`[Carteras] ${p}: ${S.carteras[p].length} tickers`);
+      console.log(`[Carteras] ${p}: ${S.carteras[p].length} tickers (Supabase)`);
     }
     return S.carteras;
   },

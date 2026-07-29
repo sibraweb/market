@@ -9,7 +9,7 @@ mismo patrón que el resto de Market Suite.
 |---|---|---|
 | ADCAP / IEB / BCCH ("↓ Sheet") | `SibraBrokers.loadTenencias()` → Sheet `TENENCIAS.CURRENT`, alimentado automáticamente por `sibra-brokers-repo`. **NO es un Excel de Drive** — el botón "↓ Sheet" solo fuerza un re-fetch salteando el cache (`SibraCache`, TTL 60s), no sube nada a mano. | No — ya está en la base real. |
 | Cauciones (usadas para % bruto) | `SibraBrokers.loadCauciones()` → Sheet `CAUCIONES.CURRENT`, misma base. | No — ya está en la base real. |
-| Clientes ("↓ Drive" / "↑ Local") | Excel en una carpeta de Drive (`cargarClientesDrive`/`parseClientes`). Dueño de `cc`/`cliente`/`alyc` para `findCliente()`. | **Sí, pendiente** — se mantiene a propósito hasta migrar a Supabase (decisión 2026-07-23, no tocar antes de esa migración). |
+| Clientes ("↻ Base") | **Supabase `market_clientes`** vía `SibraMaestros.clientes()` (migrado 2026-07-29; el Excel de Drive quedó como respaldo congelado). Se edita en `../maestros/`. Dueño de `cc`/`cliente`/`alyc` para `findCliente()`. | No — ya migrado. |
 | Precios | data912 en vivo (API), no hay carga manual. | No aplica. |
 
 ## Bugs de cartera neta/bruta encontrados y arreglados (2026-07-23)

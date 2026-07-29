@@ -305,19 +305,19 @@ th:hover { background:var(--bg4); }
     <div class="drive-grid">
       <div class="source-card" id="sc-tenencias">
         <div class="sc-title">Tenencias (ADCAP+IEB+BCCH)</div>
-        <div class="sc-file" id="sc-tenencias-name">Google Sheets (TENENCIAS.CURRENT)</div>
+        <div class="sc-file" id="sc-tenencias-name">brokers_tenencias · Supabase (fallback Sheets)</div>
         <div class="sc-status idle" id="sc-tenencias-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↓ Sheet</button>
+          <button class="btn btn-secondary btn-sm" onclick="cargarTenenciasSheet(true)">↻ Base</button>
         </div>
       </div>
       <div class="source-card" id="sc-clientes">
         <div class="sc-title">Clientes</div>
-        <div class="sc-file" id="sc-clientes-name">Carpeta Drive</div>
+        <div class="sc-file" id="sc-clientes-name">market_clientes · Supabase</div>
         <div class="sc-status idle" id="sc-clientes-status"><span>●</span> Sin cargar</div>
         <div class="sc-btn">
-          <button class="btn btn-secondary btn-sm" onclick="cargarClientesDrive()">↓ Drive</button>
-          <button class="btn btn-secondary btn-sm" onclick="pickClientesLocal()">↑ Local</button>
+          <button class="btn btn-secondary btn-sm" onclick="cargarClientesDrive()">↻ Base</button>
+          <a class="btn btn-secondary btn-sm" style="text-decoration:none" href="../maestros/">✎ Editar</a>
         </div>
       </div>
       <div class="source-card" id="sc-precios">
@@ -525,6 +525,7 @@ th:hover { background:var(--bg4); }
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
+<script src="../shared/sibra-maestros.js"></script>
 <script>
 // ═══════════════════════════════════════════
 //  CONFIG
@@ -809,12 +810,11 @@ function getPrice(ticker) {
 // ═══════════════════════════════════════════
 //  CARGA DE FUENTES
 // ═══════════════════════════════════════════
-// Tenencias: fuente única SibraBrokers.loadTenencias() (Sheet TENENCIAS.CURRENT,
-// alimentado automáticamente por sibra-brokers-repo). Reemplaza la carga vieja
-// por Excel de Drive por-ALyC — esos archivos ya no se suben a mano.
+// Tenencias: fuente única SibraBrokers.loadTenencias() — Supabase
+// (brokers_tenencias, espejo que pisa el backend cada ciclo) con fallback al
+// Sheet TENENCIAS.CURRENT. Ya no exige Google: solo lo pide el fallback.
 async function cargarTenenciasSheet(fresh=false) {
-  if(!token){alert('Conectá Drive primero');return;}
-  setStatus('tenencias','loading','Leyendo Sheet...');
+  setStatus('tenencias','loading','Leyendo base...');
   try {
     const filas=await SibraBrokers.loadTenencias({fresh});
     posiciones=posiciones.filter(p=>!['ADCAP','IEB','BCCH'].includes(p.alyc));
@@ -844,16 +844,16 @@ async function cargarTenenciasSheet(fresh=false) {
   }
 }
 
+// Clientes desde Supabase (market_clientes, se edita en ../maestros/) — antes
+// venía del Excel "Tabla de Clientes" en Drive (migrado 2026-07-29).
 async function cargarClientesDrive() {
-  if(!token){alert('Conectá Drive primero');return;}
   try {
-    setStatus('clientes','loading','Buscando...');
-    const file=await ultimoArchivo('1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2');
-    $('sc-clientes-name').textContent=file.name;
-    const buf=await driveDownload(file.id);
-    parseClientes(buf);
+    setStatus('clientes','loading','Leyendo base...');
+    const rows=await SibraMaestros.clientes();
+    clientes=rows.map(c=>({cc:String(c.cc),cliente:c.cliente,alyc:c.alyc}));
+    $('sc-clientes-name').textContent='market_clientes · Supabase';
     setStatus('clientes','ok',`${clientes.length} clientes`);
-    log(`✅ Clientes: ${clientes.length}`,'log-ok');
+    log(`✅ Clientes: ${clientes.length} (Supabase)`,'log-ok');
     $('kpiCli').textContent=clientes.length;
     $('kpiRow').style.display='';
   } catch(e){ setStatus('clientes','error','Error: '+e.message); log(`❌ Clientes: ${e.message}`,'log-err'); }

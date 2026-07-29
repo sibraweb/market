@@ -11,6 +11,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
+<script src="../shared/sibra-maestros.js"></script>
 <style>
 :root {
   --red: #E10600;
@@ -942,12 +943,12 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
         </div>
 
         <div class="source-card" id="sc-allocation">
-          <div class="sc-title">Allocation (PAPELES) · maestro de clasificación</div>
-          <div class="sc-file" id="sc-allocation-name">Carpeta configurada</div>
+          <div class="sc-title">Maestros · clasificación PAPELES + modelo + clientes</div>
+          <div class="sc-file" id="sc-allocation-name">Base Supabase (market_papeles / market_modelos / market_clientes)</div>
           <div class="sc-status idle" id="sc-allocation-status"><span>●</span> Sin cargar</div>
           <div style="display:flex; gap:6px; margin-top:10px;">
-            <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarFuenteDesdeCarpeta('allocation','1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI')">↓ Drive</button>
-            <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.pickLocalFile('allocation')">↑ Local</button>
+            <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarMaestros(true)">↻ Recargar de la base</button>
+            <a class="btn-secondary" style="font-size:11px; padding:4px 10px; text-decoration:none;" href="../maestros/">✎ Editar maestros</a>
           </div>
         </div>
       </div>
@@ -1924,36 +1925,40 @@ async function archivoMasRecienteDeCarpeta(folderId) {
   return data.files[0];
 }
 
-async function cargarFuenteDesdeCarpeta(key, folderId) {
-  if (!S.token) { alert('Conectá Drive primero.'); return; }
+// Maestros desde Supabase (tablas market_papeles/market_modelos/market_clientes,
+// se editan en ../maestros/). Reemplaza la carga por Excel de Drive: los Excel
+// de las carpetas de Drive quedaron como respaldo histórico, ya no se leen.
+async function cargarMaestros(fresh = false) {
   try {
-    setSourceStatus(key, 'loading', 'Buscando archivo más reciente...');
-    const file = await archivoMasRecienteDeCarpeta(folderId);
-    log(`☁ ${key}: encontrado "${file.name}" (${new Date(file.modifiedTime).toLocaleDateString('es-AR')})`, 'log-ok');
-    setSourceStatus(key, 'loading', `Descargando ${file.name}...`);
-    const nameEl = $(`sc-${key}-name`);
-    if (nameEl) nameEl.textContent = file.name;
-    const buf = await driveDownload(file.id);
-    await processSourceFile(key, buf, file.name);
-  } catch(e) {
-    setSourceStatus(key, 'error', 'Error: ' + e.message);
-    log(`❌ ${key}: ${e.message}`, 'log-err');
+    setSourceStatus('allocation', 'loading', 'Leyendo maestros de la base...');
+    const [pap, mod, cli] = await Promise.all([
+      SibraMaestros.papeles({ fresh }),
+      SibraMaestros.modelos({ fresh }),
+      SibraMaestros.clientes({ fresh }),
+    ]);
+    S.allocation = SibraMaestros.papelesDict(pap);
+    S.modelos = SibraMaestros.modelosPorPerfil(mod);
+    // Misma forma que dejaba parseClientes. Las cauciones NO están en el
+    // maestro: llegan de la base sibra-brokers y se overlayan en loadData.
+    S.clientes = cli.map(c => ({
+      cc: String(c.cc), cliente: c.cliente, cuit: c.cuit, alyc: c.alyc,
+      monto: Number(c.monto) || 0, perfil: c.perfil || 'AGRESIVO',
+      LP: Number(c.lp) || 0, MP: Number(c.mp) || 0, CP: Number(c.cp) || 0,
+      CASH: Number(c.cash) || 0, PALANCA: Number(c.palanca) || 1,
+      cartera: Number(c.cartera) || 0, total: Number(c.total) || 0,
+      caucionPesos: 0, caucionDolares: 0,
+    }));
+    setSourceStatus('allocation', 'ok', `${pap.length} papeles · ${mod.length} pos. modelo · ${cli.length} clientes`);
+    const kpiA = $('kpiAlloc'); if (kpiA) kpiA.textContent = pap.length;
+    const kpiC = $('kpiCli');   if (kpiC) kpiC.textContent = cli.length;
+    log(`✅ Maestros: ${pap.length} papeles, ${mod.length} posiciones modelo, ${cli.length} clientes (Supabase)`, 'log-ok');
+    renderModelo();
+    actualizarSelectores();
+  } catch (e) {
+    setSourceStatus('allocation', 'error', 'Error: ' + e.message);
+    log(`❌ Maestros: ${e.message}`, 'log-err');
+    throw e;
   }
-}
-
-function pickLocalFile(key) {
-  const input = $('fileInput');
-  input.onchange = async () => {
-    const file = input.files[0];
-    if (!file) return;
-    setSourceStatus(key, 'loading', 'Leyendo...');
-    const nameEl = $(`sc-${key}-name`);
-    if (nameEl) nameEl.textContent = file.name;
-    const buf = await readFileAsArrayBuffer(file);
-    await processSourceFile(key, buf, file.name);
-    input.value = '';
-  };
-  input.click();
 }
 
 // ══════════════════════════════════════════
@@ -2086,38 +2091,6 @@ function getPrecioUnitario(ticker, tipo) {
   return raw;
 }
 
-// ══════════════════════════════════════════
-//  PARSEO DE ARCHIVOS — FIX null-safety
-// ══════════════════════════════════════════
-async function processSourceFile(key, buf, name) {
-  try {
-    const wb = XLSX.read(buf, { type: 'array' });
-    if (key === 'clientes') {
-      parseClientes(wb);
-      setSourceStatus('clientes', 'ok', `${S.clientes.length} clientes`);
-      const kpiC = $('kpiCli');
-      if (kpiC) kpiC.textContent = S.clientes.length;
-      log(`✅ Clientes: ${S.clientes.length} registros`, 'log-ok');
-    } else if (key === 'allocation') {
-      parseAllocation(wb);
-      setSourceStatus('allocation', 'ok', `${Object.keys(S.allocation).length} tickers`);
-      const kpiA = $('kpiAlloc');
-      if (kpiA) kpiA.textContent = Object.keys(S.allocation).length;
-      log(`✅ Allocation: ${Object.keys(S.allocation).length} tickers`, 'log-ok');
-    } else if (key === 'modelo') {
-      parseModelo(wb);
-      const total = Object.values(S.modelos).reduce((a,p) => a + Object.values(p).reduce((b,arr) => b+arr.length, 0), 0);
-      setSourceStatus('modelo', 'ok', `${total} posiciones modelo`);
-      log(`✅ Modelo: ${total} posiciones`, 'log-ok');
-      renderModelo();
-    }
-    actualizarSelectores();
-  } catch(e) {
-    setSourceStatus(key, 'error', 'Error: ' + e.message);
-    log(`❌ Error en ${key}: ${e.message}`, 'log-err');
-  }
-}
-
 // Parsea números con formato monetario argentino: "$6.382.856,50" → 6382856.50
 // También maneja números normales, strings vacíos y valores de Excel
 function parseNum(val) {
@@ -2156,119 +2129,21 @@ function findCliente(comitente, alyc) {
   return S.clientes.find(c => normCC(c.cc) === norm);
 }
 
-function parseClientes(wb) {
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-
-  // Detectar nombre real de columna CC (cc, CC, CCC, Cuenta, Comitente, etc.)
-  const firstRow = rows[0] || {};
-  const ccKey = Object.keys(firstRow).find(k =>
-    /^(cc|ccc|cuenta|comitente|n[^a-z]*comitente)$/i.test(k.trim())
-  ) || Object.keys(firstRow)[0] || 'cc';
-
-  // Detectar columnas de caución con variantes de typos
-  const findCol = (row, aliases) => {
-    const k = Object.keys(row).find(k => aliases.some(a => k.toLowerCase().replace(/[^a-z]/g,'').includes(a)));
-    return k ? row[k] : undefined;
-  };
-
-  S.clientes = rows.map(r => {
-    const rawCC = r[ccKey] ?? r.cc ?? r.CC ?? r.CCC ?? r.Cuenta ?? r.CUENTA ?? '';
-    const caucionP = findCol(r, ['caucionenpesos','cacionenpesos','caucionpesos','cacionpesos']) ?? 0;
-    const caucionD = findCol(r, ['caucionendolares','cacionendolares','cauciondolares','caciondolares']) ?? 0;
-    return {
-      cc:             normCC(rawCC),
-      cliente:        String(r.cliente || r.Cliente || r.CLIENTE || '').trim(),
-      cuit:           String(r.CUIT || r.cuit || '').trim(),
-      alyc:           String(r.alyc || r.ALyC || r.ALYC || '').trim().toUpperCase(),
-      monto:          parseNum(r.monto),
-      perfil:         String(r.perfil || r.Perfil || 'AGRESIVO').trim().toUpperCase(),
-      LP:             parseNum(r.LP),
-      MP:             parseNum(r.MP),
-      CP:             parseNum(r.CP),
-      CASH:           parseNum(r.CASH),
-      PALANCA:        parseNum(r.PALANCA) || 1,
-      cartera:        parseNum(r.Cartera),
-      total:          parseNum(r.Total),
-      caucionPesos:   parseNum(caucionP),
-      caucionDolares: parseNum(caucionD),
-    };
-  }).filter(r => r.cc);
-
-  // Log para debug de match
-  console.log('[Clientes] CCs cargados (primeros 5):', S.clientes.slice(0,5).map(c => `${c.cc} | ${c.cliente} | cauP=${c.caucionPesos} | cauD=${c.caucionDolares}`));
-}
-
-function parseAllocation(wb) {
-  const ws = wb.Sheets['PAPELES'] || wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-  S.allocation = {};
-  rows.forEach(r => {
-    const sym = String(r.SIMBOLO || r.Simbolo || '').trim().toUpperCase();
-    if (!sym) return;
-    S.allocation[sym] = {
-      subgrupo:  String(r.SUBGRUPO  || '').trim(),
-      grupo:     String(r.GRUPO     || '').trim(),
-      pais:      String(r.PAIS      || '').trim(),
-      moneda:    String(r.MONEDA    || '').trim(),
-      subtipo:   String(r.SUBTIPO   || '').trim(),
-      sector:    String(r.SECTOR    || '').trim(),
-      industria: String(r.INDUSTRIA || '').trim(),
-      vto:       String(r['VTO.']   || '').trim(),
-      monedaCartera: String(r['MONEDA DE CARTERA'] || '').trim(),
-    };
-  });
-}
-
-function parseModelo(wb) {
-  const perfiles = ['AGRESIVO','MODERADO','CONSERVADOR'];
-  const plazos = ['LARGO','MEDIANO','CORTO','CASH','PALANCA'];
-  S.modelos = {};
-  perfiles.forEach(p => {
-    S.modelos[p] = {};
-    const sheetName = wb.SheetNames.find(n => n.toUpperCase().includes(p)) || wb.SheetNames[0];
-    const ws = wb.Sheets[sheetName];
-    if (!ws) return;
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 });
-    let currentPlazo = null;
-    rows.forEach(row => {
-      const cell0 = String(row[0] || '').trim().toUpperCase();
-      const matchPlazo = plazos.find(pl => cell0.includes(pl));
-      if (matchPlazo) { currentPlazo = matchPlazo; if (!S.modelos[p][currentPlazo]) S.modelos[p][currentPlazo] = []; return; }
-      if (currentPlazo && currentPlazo !== 'PALANCA') {
-        const ticker = String(row[0] || row[1] || '').trim().toUpperCase();
-        if (!ticker || ticker.length < 1) return;
-        let pond = parseFloat(row[1] || row[2] || 0);
-        if (!isFinite(pond)) return;
-        if (pond > 1) pond = pond / 100;
-        const precioRef = parseFloat(row[2] || row[3] || 0) || null;
-        S.modelos[p][currentPlazo].push({ ticker, ponderacion: pond, precioRef });
-      }
-    });
-  });
-}
-
 // ══════════════════════════════════════════
-//  FUENTE DE DATOS: base de sibra-brokers (TENENCIAS + CAUCIONES).
-//  Reemplaza la carga por Excel de tenencias/cauciones. La clasificación
-//  (maestro PAPELES/allocation) y el modelo siguen viniendo de Drive porque
-//  la base no clasifica país/grupo/sector ni define carteras objetivo.
+//  FUENTE DE DATOS: todo Supabase — maestros (market_*) + tenencias/cauciones
+//  (brokers_*, espejo que pisa el backend cada ciclo). Google ya no se exige:
+//  solo lo pide el fallback a Sheets si Supabase no responde.
 // ══════════════════════════════════════════
 async function loadData(fresh = false) {
-  if (!S.token) { alert('Conectá con Google primero.'); return; }
   if ($('processLog')) $('processLog').innerHTML = '';
   log('☁ Cargando cartera desde la base sibra-brokers...', 'log-ok');
   try {
-    // 1) Maestros de Drive (la base no los provee): PAPELES (clasificación) y
-    //    tabla de clientes (perfil, para el rebalanceo contra las carteras tipo).
-    if (fresh || !S.allocation || !Object.keys(S.allocation).length) {
-      await cargarFuenteDesdeCarpeta('allocation', '1N1iMCqBeLnA6AxJMiOwP8ifHxwQkyvnI');
-    }
-    if (fresh || !S.clientes || !S.clientes.length) {
-      await cargarFuenteDesdeCarpeta('clientes', '1HBVS0yIWUO_ywEowbovGnN2eUrj5I3n2');
-    }
-    if (fresh || !S.modelos || !Object.keys(S.modelos).length) {
-      await cargarFuenteDesdeCarpeta('modelo', '1kp9JuBqLxc2VZFEnjRxo_BNVQEHZOIYL');
+    // 1) Maestros desde Supabase (la base de brokers no los provee): PAPELES
+    //    (clasificación), modelo (carteras objetivo) y clientes (perfil).
+    if (fresh || !S.allocation || !Object.keys(S.allocation).length
+        || !S.clientes || !S.clientes.length
+        || !S.modelos || !Object.keys(S.modelos).length) {
+      await cargarMaestros(fresh);
     }
     if (!Array.isArray(S.clientes)) S.clientes = [];
     // 2) Precios data912 (para rebalanceo/target) + MEP.
@@ -3375,8 +3250,7 @@ function init() {
 
 return {
   driveAuth, driveRevoke, driveBrowse, closeDrivePicker, confirmDrivePick,
-  pickLocalFile,
-  cargarFuenteDesdeCarpeta, cargarTodoDesdeDrive,
+  cargarMaestros, cargarTodoDesdeDrive,
   procesarArchivos, loadData, fetchPrices, fetchMEP,
   onAlycChange, onClienteChange, onRotAlycChange,
   filtrarCartera, limpiarFiltroGlobal, sortCartera,
