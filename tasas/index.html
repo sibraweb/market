@@ -104,8 +104,17 @@ td.num { text-align:right; }
   </section>
 
   <section class="panel" id="panel-cheques">
-    <div class="grid-2" id="tablasMav"></div>
-    <p class="card-note" style="margin-top:16px">Fuente: <a href="https://mavdata.mav-sa.com.ar/operaciones/dashboard" style="color:var(--text2)">mavdata.mav-sa.com.ar</a>. Foto del momento (se pisa en cada refresh), no histórico.</p>
+    <div class="panel-box">
+      <div class="card-title">Cheques / eCheqs avalados — Tasas Promedio por plazo</div>
+      <div class="chart-wrap"><canvas id="chartMavCheques"></canvas></div>
+      <div id="emptyMavCheques" class="empty-state" style="display:none"><p>Sin datos ahora.</p></div>
+    </div>
+    <div class="panel-box">
+      <div class="card-title">Pagarés bursátiles — Tasas Promedio por plazo</div>
+      <div class="chart-wrap"><canvas id="chartMavPagares"></canvas></div>
+      <div id="emptyMavPagares" class="empty-state" style="display:none"><p>Sin datos ahora.</p></div>
+    </div>
+    <p class="card-note">Fuente: <a href="https://mavdata.mav-sa.com.ar/operaciones/dashboard" style="color:var(--text2)">mavdata.mav-sa.com.ar</a> — mismo gráfico que el dashboard de MAV (TNA promedio ponderada por plazo y segmento). Foto del momento (se pisa en cada refresh), no histórico.</p>
   </section>
 
   <section class="panel" id="panel-bcra">
@@ -246,23 +255,56 @@ const App = (() => {
     });
   }
 
-  // ── MAV: cheques/pagarés por segmento y rango ──
-  function tablaMav(instrumento, titulo) {
+  // ── MAV: cheques/pagarés — línea por segmento a través de los rangos de
+  //    plazo (mismo gráfico "Tasas Promedio" que el dashboard de MAV).
+  let chartMavCheques = null, chartMavPagares = null;
+  const SEGMENTO_COLOR = {
+    avalado: '#a68a2e', 'no garantizado': '#22b8c8', garantizado: '#e0c341',
+  };
+  function colorSegmento(s, i) {
+    return SEGMENTO_COLOR[String(s || '').toLowerCase()] || ['#E10600', '#3b82f6', '#22c55e', '#f59e0b'][i % 4];
+  }
+  // Orden numérico real de "0-30"/"31-60"/... (alfabético rompería con "181-365" antes que "31-60")
+  function ordenRango(r) { return parseInt(String(r).split('-')[0], 10) || 0; }
+
+  function chartMav(canvasId, emptyId, prevChart, instrumento) {
     const filas = mavRows.filter(r => r.instrumento === instrumento);
-    if (!filas.length) return `<div class="panel-box"><div class="card-title">${titulo}</div><div class="empty-state"><p>Sin datos ahora.</p></div></div>`;
-    const rows = filas.map(f => `<tr>
-      <td>${f.segmento}</td><td>${f.rango}d</td>
-      <td class="num">${Number(f.tna).toFixed(2)}%</td>
-      <td class="num">${f.tea != null ? Number(f.tea).toFixed(2) + '%' : '—'}</td>
-    </tr>`).join('');
-    return `<div class="panel-box"><div class="card-title">${titulo}</div>
-      <table><thead><tr><th>Segmento</th><th>Rango</th><th class="num">TNA</th><th class="num">TEA</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+    const $empty = $(emptyId), $canvas = $(canvasId);
+    if (prevChart) prevChart.destroy();
+    if (!filas.length) { $empty.style.display = ''; $canvas.style.display = 'none'; return null; }
+    $empty.style.display = 'none'; $canvas.style.display = '';
+
+    const rangos = [...new Set(filas.map(f => f.rango))].sort((a, b) => ordenRango(a) - ordenRango(b));
+    const segmentos = [...new Set(filas.map(f => f.segmento))];
+    const datasets = segmentos.map((seg, i) => ({
+      label: seg.charAt(0).toUpperCase() + seg.slice(1),
+      data: rangos.map(r => {
+        const f = filas.find(x => x.segmento === seg && x.rango === r);
+        return f ? Number(f.tna) : null;
+      }),
+      borderColor: colorSegmento(seg, i), backgroundColor: colorSegmento(seg, i),
+      spanGaps: true, tension: .3, pointRadius: 4, pointBackgroundColor: colorSegmento(seg, i),
+      pointBorderColor: '#141414', pointBorderWidth: 1, borderWidth: 2,
+    }));
+    return new Chart($canvas, {
+      type: 'line',
+      data: { labels: rangos.map(r => r + 'd'), datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#a6a6a6', boxWidth: 12 } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw?.toFixed(2) ?? '—'}% TNA` } },
+        },
+        scales: {
+          x: { title: { display: true, text: 'Plazo (días)', color: '#a6a6a6' }, ticks: { color: '#a6a6a6' }, grid: { color: 'rgba(255,255,255,.06)' } },
+          y: { title: { display: true, text: 'Tasa TNA %', color: '#a6a6a6' }, ticks: { color: '#a6a6a6', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.06)' } },
+        },
+      },
+    });
   }
   function renderMav() {
-    $('tablasMav').innerHTML =
-      tablaMav('cheques', 'Cheques / eCheqs avalados') +
-      tablaMav('pagares', 'Pagarés bursátiles');
+    chartMavCheques = chartMav('chartMavCheques', 'emptyMavCheques', chartMavCheques, 'cheques');
+    chartMavPagares = chartMav('chartMavPagares', 'emptyMavPagares', chartMavPagares, 'pagares');
   }
 
   // ── BCRA: última tasa de referencia de cada serie ──
