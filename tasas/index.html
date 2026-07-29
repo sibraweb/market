@@ -25,10 +25,15 @@ body { background:var(--bg); color:var(--text); font-family:'Montserrat',sans-se
 .back-btn { background:transparent; border:1px solid var(--border2); color:var(--text2); padding:5px 12px; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:flex; align-items:center; gap:5px; transition:all .2s; }
 .back-btn:hover { border-color:var(--red); color:var(--red-light); }
 .pub-badge { font-size:10px; color:var(--text3); border:1px solid var(--border); border-radius:20px; padding:4px 10px; }
-.main { max-width:1100px; margin:0 auto; padding:28px 20px 80px; }
+.main { max-width:1180px; margin:0 auto; padding:28px 20px 80px; }
+.nav-tabs { background:var(--bg2); border-bottom:1px solid var(--border); padding:0 24px; display:flex; margin:0 -20px 24px; }
+.nav-tab { padding:12px 22px; cursor:pointer; font-size:12px; font-weight:500; color:var(--text3); border-bottom:2px solid transparent; transition:all .15s; letter-spacing:.04em; }
+.nav-tab:hover { color:var(--text2); }
+.nav-tab.active { color:var(--red); border-bottom-color:var(--red); }
+.panel { display:none; } .panel.active { display:block; }
 .hero { margin-bottom:20px; }
 .hero h1 { font-size:20px; font-weight:700; margin-bottom:4px; }
-.hero p { color:var(--text2); font-size:12px; max-width:700px; }
+.hero p { color:var(--text2); font-size:12px; max-width:760px; }
 .tile-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px; }
 .tile { background:var(--bg2); border:1px solid var(--border2); border-radius:10px; padding:16px 18px; }
 .tile-label { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text3); margin-bottom:8px; }
@@ -37,12 +42,20 @@ body { background:var(--bg); color:var(--text); font-family:'Montserrat',sans-se
 .tile-sub { font-size:11px; color:var(--text3); margin-top:4px; }
 .panel-box { background:var(--bg2); border:1px solid var(--border2); border-radius:10px; padding:20px 24px; margin-bottom:20px; }
 .card-title { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text2); margin-bottom:14px; }
+.card-note { font-size:11px; color:var(--text3); margin-top:10px; }
 .chart-wrap { position:relative; height:320px; }
+.chart-wrap.sm { height:260px; }
 .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 select { background:var(--bg3); border:1px solid var(--border2); border-radius:6px; color:var(--text); padding:7px 12px; font-family:'Montserrat',sans-serif; font-size:12px; cursor:pointer; }
 .empty-state { text-align:center; padding:50px 20px; color:var(--text3); }
 .source-note { font-size:11px; color:var(--text3); margin-top:6px; }
 .source-note a { color:var(--text2); }
+table { width:100%; border-collapse:collapse; }
+th { text-align:left; font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text3); padding:8px 10px; border-bottom:1px solid var(--border2); }
+td { padding:8px 10px; border-bottom:1px solid var(--border); font-size:12px; font-variant-numeric:tabular-nums; }
+td.num { text-align:right; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+@media (max-width:800px) { .grid-2 { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -54,67 +67,117 @@ select { background:var(--bg3); border:1px solid var(--border2); border-radius:6
 </header>
 <main class="main">
   <div class="hero">
-    <h1>Cauciones en pesos (BYMA)</h1>
-    <p>Tasa TNA de referencia por plazo, histórico diario. Fuente: API pública de BYMA (open.bymadata.com.ar), guardada por el módulo <code>indices</code> — mismo circuito que CER/dólar/BADLAR. La curva completa en vivo (83 plazos) la sigue dando <code>financiamiento.py</code> de Tesorería.</p>
+    <h1>Panorama de tasas</h1>
+    <p>Cauciones (BYMA), cheques/pagarés avalados (MAV) y tasas de referencia bancarias (BCRA) — todo dato de mercado público, guardado por el módulo <code>indices</code>. Actualiza solo cada 4hs.</p>
   </div>
 
-  <div class="tile-row" id="tiles"></div>
+  <nav class="nav-tabs">
+    <div class="nav-tab active" data-tab="cauciones">Cauciones</div>
+    <div class="nav-tab" data-tab="cheques">Cheques / Pagarés (MAV)</div>
+    <div class="nav-tab" data-tab="bcra">Referencia BCRA</div>
+  </nav>
 
-  <div class="panel-box">
-    <div class="row" style="justify-content:space-between; margin-bottom:14px">
-      <div class="card-title" style="margin:0">Evolución</div>
-      <div class="row">
-        <select id="rango" onchange="App.render()">
+  <section class="panel active" id="panel-cauciones">
+    <div class="tile-row" id="tilesCaucion"></div>
+
+    <div class="panel-box">
+      <div class="card-title">Curva de tasas — hoy</div>
+      <div class="chart-wrap"><canvas id="chartCurva"></canvas></div>
+      <p class="card-note">Tasa TNA por plazo hasta el vencimiento (días), TODOS los contratos operados hoy en BYMA — no confundir con la ventana de tiempo del gráfico de abajo.</p>
+    </div>
+
+    <div class="panel-box">
+      <div class="row" style="justify-content:space-between; margin-bottom:14px">
+        <div class="card-title" style="margin:0">Evolución de los plazos de referencia (1/7/14/30 días)</div>
+        <select id="rango" onchange="App.renderEvolucion()">
           <option value="30">Últimos 30 días</option>
           <option value="90" selected>Últimos 90 días</option>
           <option value="365">Último año</option>
           <option value="99999">Todo</option>
         </select>
       </div>
+      <div class="chart-wrap"><canvas id="chartEvolucion"></canvas></div>
+      <div id="emptyEvolucion" class="empty-state" style="display:none">
+        <p>Todavía hay un solo día guardado — la línea se va completando a medida que pasan los refrescos (cada 4hs).</p>
+      </div>
     </div>
-    <div class="chart-wrap"><canvas id="chartCaucion"></canvas></div>
-    <div id="emptyState" class="empty-state" style="display:none">
-      <p>Sin datos todavía — el primer refresh de <code>indices</code> corre solo cada 4hs.</p>
-    </div>
-  </div>
+  </section>
 
-  <p class="source-note">Otras tasas (BCRA, MAV cheques/pagarés) — próximo paso, mismo módulo. Ver <a href="../../SIBRA_SERVER/docs/MARKET.md">MARKET.md</a>.</p>
+  <section class="panel" id="panel-cheques">
+    <div class="grid-2" id="tablasMav"></div>
+    <p class="card-note" style="margin-top:16px">Fuente: <a href="https://mavdata.mav-sa.com.ar/operaciones/dashboard" style="color:var(--text2)">mavdata.mav-sa.com.ar</a>. Foto del momento (se pisa en cada refresh), no histórico.</p>
+  </section>
+
+  <section class="panel" id="panel-bcra">
+    <div class="tile-row" id="tilesBcra"></div>
+    <p class="card-note">Promedio del sistema bancario, publicado por el BCRA (régimen de transparencia). No es la tasa de un banco específico.</p>
+  </section>
+
+  <p class="source-note">Ver <a href="../../SIBRA_SERVER/docs/MARKET.md">MARKET.md</a> para el detalle de fuentes y el circuito completo.</p>
 </main>
 
 <script>
 const App = (() => {
   const $ = id => document.getElementById(id);
-  const COLS = [
+  const COLS_REF = [
     { key: 'TASA_1D',  label: '1 día',   color: '#E10600' },
     { key: 'TASA_7D',  label: '7 días',  color: '#f59e0b' },
     { key: 'TASA_14D', label: '14 días', color: '#3b82f6' },
     { key: 'TASA_30D', label: '30 días', color: '#22c55e' },
   ];
-  let rows = []; // [{fecha, columna, valor}]
-  let chart = null;
+  const BCRA_TILES = [
+    { serie: 'BADLAR', label: 'BADLAR bancos privados' },
+    { serie: 'TAMAR', label: 'TAMAR bancos privados' },
+    { serie: 'DEPOSITOS_30D', label: 'Plazo fijo 30 días' },
+    { serie: 'ADELANTOS_CTA_CTE', label: 'Adelantos en cta. cte.' },
+    { serie: 'PRESTAMOS_PERSONALES', label: 'Préstamos personales' },
+  ];
+  let historico = [], curvaHoy = [], mavRows = [], bcraRows = [];
+  let chartCurva = null, chartEvolucion = null;
 
-  async function cargar() {
-    try {
-      rows = await SibraMaestros.selectAllPublic('series_valores', '&serie=eq.CAUCION&order=fecha.asc');
-    } catch (e) {
-      console.error('[tasas] error cargando series_valores:', e);
-      rows = [];
-    }
-    render();
+  function initNav() {
+    document.querySelectorAll('.nav-tab').forEach(t => t.addEventListener('click', () => {
+      document.querySelectorAll('.nav-tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      t.classList.add('active'); $('panel-' + t.dataset.tab).classList.add('active');
+    }));
   }
 
+  async function init() {
+    initNav();
+    const [hist, curva, mav, bcra] = await Promise.allSettled([
+      SibraMaestros.selectAllPublic('series_valores', '&serie=eq.CAUCION&order=fecha.asc'),
+      SibraMaestros.selectAllPublic('mercado_curva_cauciones', '&order=plazo_dias.asc'),
+      SibraMaestros.selectAllPublic('mercado_tasas_mav', ''),
+      SibraMaestros.selectAllPublic('series_valores', '&serie=in.(' + BCRA_TILES.map(t => t.serie).join(',') + ')&order=fecha.desc'),
+    ]);
+    historico = hist.status === 'fulfilled' ? hist.value : [];
+    curvaHoy = curva.status === 'fulfilled' ? curva.value : [];
+    mavRows = mav.status === 'fulfilled' ? mav.value : [];
+    bcraRows = bcra.status === 'fulfilled' ? bcra.value : [];
+    [hist, curva, mav, bcra].forEach(r => { if (r.status === 'rejected') console.error('[tasas]', r.reason); });
+
+    renderTilesCaucion();
+    renderCurva();
+    renderEvolucion();
+    renderMav();
+    renderBcra();
+  }
+
+  // ── Cauciones: tiles + curva de hoy + evolución histórica ──
   function porFecha() {
     const m = {};
-    rows.forEach(r => {
+    historico.forEach(r => {
       if (!m[r.fecha]) m[r.fecha] = { fecha: r.fecha };
       m[r.fecha][r.columna] = Number(r.valor);
     });
     return Object.values(m).sort((a, b) => a.fecha.localeCompare(b.fecha));
   }
 
-  function renderTiles(serie) {
+  function renderTilesCaucion() {
+    const serie = porFecha();
     const ultima = serie[serie.length - 1];
-    $('tiles').innerHTML = COLS.map(c => {
+    $('tilesCaucion').innerHTML = COLS_REF.map(c => {
       const v = ultima ? ultima[c.key] : null;
       return `<div class="tile">
         <div class="tile-label">Caución ${c.label}</div>
@@ -124,24 +187,50 @@ const App = (() => {
     }).join('');
   }
 
-  function render() {
+  function renderCurva() {
+    if (chartCurva) chartCurva.destroy();
+    if (!curvaHoy.length) return;
+    chartCurva = new Chart($('chartCurva'), {
+      type: 'line',
+      data: {
+        labels: curvaHoy.map(c => c.plazo_dias + 'd'),
+        datasets: [{
+          label: 'Tasa TNA %', data: curvaHoy.map(c => Number(c.tasa)),
+          borderColor: '#E10600', backgroundColor: 'rgba(225,6,0,.12)', fill: true,
+          tension: .2, pointRadius: 2, pointBackgroundColor: '#E10600', borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => `${c.raw?.toFixed(2)}% TNA a ${curvaHoy[c.dataIndex].plazo_dias} días (vto. ${curvaHoy[c.dataIndex].vencimiento || '—'})` } },
+        },
+        scales: {
+          x: { title: { display: true, text: 'Días al vencimiento', color: '#a6a6a6' }, ticks: { color: '#a6a6a6', maxTicksLimit: 15 }, grid: { color: 'rgba(255,255,255,.06)' } },
+          y: { ticks: { color: '#a6a6a6', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.06)' } },
+        },
+      },
+    });
+  }
+
+  function renderEvolucion() {
     const full = porFecha();
-    renderTiles(full);
-    if (!full.length) { $('emptyState').style.display = ''; if (chart) { chart.destroy(); chart = null; } return; }
-    $('emptyState').style.display = 'none';
+    if (chartEvolucion) { chartEvolucion.destroy(); chartEvolucion = null; }
+    if (full.length < 2) { $('emptyEvolucion').style.display = ''; $('chartEvolucion').style.display = 'none'; return; }
+    $('emptyEvolucion').style.display = 'none'; $('chartEvolucion').style.display = '';
     const dias = Number($('rango').value);
     const serie = full.slice(-dias);
-    const ctx = $('chartCaucion');
-    const datasets = COLS.map(c => ({
-      label: 'Caución ' + c.label,
-      data: serie.map(r => r[c.key] ?? null),
-      borderColor: c.color, backgroundColor: c.color + '22',
-      spanGaps: true, tension: .25, pointRadius: 0, borderWidth: 2,
-    }));
-    if (chart) chart.destroy();
-    chart = new Chart(ctx, {
+    chartEvolucion = new Chart($('chartEvolucion'), {
       type: 'line',
-      data: { labels: serie.map(r => r.fecha), datasets },
+      data: {
+        labels: serie.map(r => r.fecha),
+        datasets: COLS_REF.map(c => ({
+          label: 'Caución ' + c.label, data: serie.map(r => r[c.key] ?? null),
+          borderColor: c.color, backgroundColor: c.color + '22',
+          spanGaps: true, tension: .25, pointRadius: 0, borderWidth: 2,
+        })),
+      },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
@@ -157,7 +246,38 @@ const App = (() => {
     });
   }
 
-  return { render, init: cargar };
+  // ── MAV: cheques/pagarés por segmento y rango ──
+  function tablaMav(instrumento, titulo) {
+    const filas = mavRows.filter(r => r.instrumento === instrumento);
+    if (!filas.length) return `<div class="panel-box"><div class="card-title">${titulo}</div><div class="empty-state"><p>Sin datos ahora.</p></div></div>`;
+    const rows = filas.map(f => `<tr>
+      <td>${f.segmento}</td><td>${f.rango}d</td>
+      <td class="num">${Number(f.tna).toFixed(2)}%</td>
+      <td class="num">${f.tea != null ? Number(f.tea).toFixed(2) + '%' : '—'}</td>
+    </tr>`).join('');
+    return `<div class="panel-box"><div class="card-title">${titulo}</div>
+      <table><thead><tr><th>Segmento</th><th>Rango</th><th class="num">TNA</th><th class="num">TEA</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+  function renderMav() {
+    $('tablasMav').innerHTML =
+      tablaMav('cheques', 'Cheques / eCheqs avalados') +
+      tablaMav('pagares', 'Pagarés bursátiles');
+  }
+
+  // ── BCRA: última tasa de referencia de cada serie ──
+  function renderBcra() {
+    $('tilesBcra').innerHTML = BCRA_TILES.map(t => {
+      const ultima = bcraRows.find(r => r.serie === t.serie);
+      return `<div class="tile">
+        <div class="tile-label">${t.label}</div>
+        <div class="tile-value">${ultima ? Number(ultima.valor).toFixed(2) : '—'}<span class="tile-unit"> % TNA</span></div>
+        <div class="tile-sub">${ultima ? ultima.fecha : 'sin datos'}</div>
+      </div>`;
+    }).join('');
+  }
+
+  return { init, renderEvolucion };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
 </script>
