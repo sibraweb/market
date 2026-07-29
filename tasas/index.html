@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIBRA · Tasas de mercado</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="../shared/sibra-cache.js"></script>
+<script src="../shared/sibra-maestros.js"></script>
+<style>
+:root {
+  --red: #E10600; --red-dark: #B00500; --red-light: #ff3330;
+  --bg: #0d0d0d; --bg2: #141414; --bg3: #1a1a1a; --bg4: #222222;
+  --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+  --text: #f0f0f0; --text2: #a0a0a0; --text3: #555;
+  --green: #22c55e; --amber: #f59e0b; --blue: #3b82f6;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Montserrat',sans-serif; font-size:13px; min-height:100vh; }
+.app-header { background:var(--bg2); border-bottom:2px solid var(--red); padding:0 24px; height:52px; display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:100; }
+.logo { font-family:'Raleway',sans-serif; font-weight:700; font-size:18px; letter-spacing:2px; color:var(--red); }
+.logo span { color:var(--text); font-weight:300; }
+.header-sep { flex:1; }
+.back-btn { background:transparent; border:1px solid var(--border2); color:var(--text2); padding:5px 12px; border-radius:4px; cursor:pointer; font-size:11px; text-decoration:none; display:flex; align-items:center; gap:5px; transition:all .2s; }
+.back-btn:hover { border-color:var(--red); color:var(--red-light); }
+.pub-badge { font-size:10px; color:var(--text3); border:1px solid var(--border); border-radius:20px; padding:4px 10px; }
+.main { max-width:1100px; margin:0 auto; padding:28px 20px 80px; }
+.hero { margin-bottom:20px; }
+.hero h1 { font-size:20px; font-weight:700; margin-bottom:4px; }
+.hero p { color:var(--text2); font-size:12px; max-width:700px; }
+.tile-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px; }
+.tile { background:var(--bg2); border:1px solid var(--border2); border-radius:10px; padding:16px 18px; }
+.tile-label { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text3); margin-bottom:8px; }
+.tile-value { font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; }
+.tile-unit { font-size:12px; color:var(--text2); font-weight:500; }
+.tile-sub { font-size:11px; color:var(--text3); margin-top:4px; }
+.panel-box { background:var(--bg2); border:1px solid var(--border2); border-radius:10px; padding:20px 24px; margin-bottom:20px; }
+.card-title { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text2); margin-bottom:14px; }
+.chart-wrap { position:relative; height:320px; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+select { background:var(--bg3); border:1px solid var(--border2); border-radius:6px; color:var(--text); padding:7px 12px; font-family:'Montserrat',sans-serif; font-size:12px; cursor:pointer; }
+.empty-state { text-align:center; padding:50px 20px; color:var(--text3); }
+.source-note { font-size:11px; color:var(--text3); margin-top:6px; }
+.source-note a { color:var(--text2); }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <div class="logo">SIBRA<span> · Tasas de mercado</span></div>
+  <a href="../" class="back-btn">← Market Suite</a>
+  <div class="header-sep"></div>
+  <span class="pub-badge">● dato público, sin login</span>
+</header>
+<main class="main">
+  <div class="hero">
+    <h1>Cauciones en pesos (BYMA)</h1>
+    <p>Tasa TNA de referencia por plazo, histórico diario. Fuente: API pública de BYMA (open.bymadata.com.ar), guardada por el módulo <code>indices</code> — mismo circuito que CER/dólar/BADLAR. La curva completa en vivo (83 plazos) la sigue dando <code>financiamiento.py</code> de Tesorería.</p>
+  </div>
+
+  <div class="tile-row" id="tiles"></div>
+
+  <div class="panel-box">
+    <div class="row" style="justify-content:space-between; margin-bottom:14px">
+      <div class="card-title" style="margin:0">Evolución</div>
+      <div class="row">
+        <select id="rango" onchange="App.render()">
+          <option value="30">Últimos 30 días</option>
+          <option value="90" selected>Últimos 90 días</option>
+          <option value="365">Último año</option>
+          <option value="99999">Todo</option>
+        </select>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartCaucion"></canvas></div>
+    <div id="emptyState" class="empty-state" style="display:none">
+      <p>Sin datos todavía — el primer refresh de <code>indices</code> corre solo cada 4hs.</p>
+    </div>
+  </div>
+
+  <p class="source-note">Otras tasas (BCRA, MAV cheques/pagarés) — próximo paso, mismo módulo. Ver <a href="../../SIBRA_SERVER/docs/MARKET.md">MARKET.md</a>.</p>
+</main>
+
+<script>
+const App = (() => {
+  const $ = id => document.getElementById(id);
+  const COLS = [
+    { key: 'TASA_1D',  label: '1 día',   color: '#E10600' },
+    { key: 'TASA_7D',  label: '7 días',  color: '#f59e0b' },
+    { key: 'TASA_14D', label: '14 días', color: '#3b82f6' },
+    { key: 'TASA_30D', label: '30 días', color: '#22c55e' },
+  ];
+  let rows = []; // [{fecha, columna, valor}]
+  let chart = null;
+
+  async function cargar() {
+    try {
+      rows = await SibraMaestros.selectAllPublic('series_valores', '&serie=eq.CAUCION&order=fecha.asc');
+    } catch (e) {
+      console.error('[tasas] error cargando series_valores:', e);
+      rows = [];
+    }
+    render();
+  }
+
+  function porFecha() {
+    const m = {};
+    rows.forEach(r => {
+      if (!m[r.fecha]) m[r.fecha] = { fecha: r.fecha };
+      m[r.fecha][r.columna] = Number(r.valor);
+    });
+    return Object.values(m).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  }
+
+  function renderTiles(serie) {
+    const ultima = serie[serie.length - 1];
+    $('tiles').innerHTML = COLS.map(c => {
+      const v = ultima ? ultima[c.key] : null;
+      return `<div class="tile">
+        <div class="tile-label">Caución ${c.label}</div>
+        <div class="tile-value" style="color:${c.color}">${v != null ? v.toFixed(1) : '—'}<span class="tile-unit"> % TNA</span></div>
+        <div class="tile-sub">${ultima ? ultima.fecha : 'sin datos'}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function render() {
+    const full = porFecha();
+    renderTiles(full);
+    if (!full.length) { $('emptyState').style.display = ''; if (chart) { chart.destroy(); chart = null; } return; }
+    $('emptyState').style.display = 'none';
+    const dias = Number($('rango').value);
+    const serie = full.slice(-dias);
+    const ctx = $('chartCaucion');
+    const datasets = COLS.map(c => ({
+      label: 'Caución ' + c.label,
+      data: serie.map(r => r[c.key] ?? null),
+      borderColor: c.color, backgroundColor: c.color + '22',
+      spanGaps: true, tension: .25, pointRadius: 0, borderWidth: 2,
+    }));
+    if (chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: serie.map(r => r.fecha), datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#a6a6a6', boxWidth: 12 } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw?.toFixed(2) ?? '—'}%` } },
+        },
+        scales: {
+          x: { ticks: { color: '#a6a6a6', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,.06)' } },
+          y: { ticks: { color: '#a6a6a6', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.06)' } },
+        },
+      },
+    });
+  }
+
+  return { render, init: cargar };
+})();
+document.addEventListener('DOMContentLoaded', App.init);
+</script>
+</body>
+</html>

@@ -197,6 +197,6 @@ const SibraBrokers = (() => {
     return m ? { ticker: m[0], label: m[1], bucket: m[2] } : null;
   }
 
-  return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, loadTenencias, loadCauciones, cashBucket,
+  return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, snapshotRows, loadTenencias, loadCauciones, cashBucket,
            clasificar, precioUnitario, TIPO_INFO };
 })();

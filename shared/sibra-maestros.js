@@ -146,6 +146,30 @@ const SibraMaestros = (() => {
     return out;
   }
 
+  // ── REST público (SIN login) — solo para tablas con policy de lectura
+  // pública (ej. series_valores de indices: datos de mercado, no de un
+  // cliente). NO usar con market_papeles/modelos/clientes ni brokers_* —
+  // esas exigen sesión (ensureLogin) por diseño.
+  async function restPublic(pathQuery, { headers = {} } = {}) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${pathQuery}`, {
+      headers: { apikey: ANON_KEY, ...headers },
+    });
+    if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
+    return r.json();
+  }
+
+  async function selectAllPublic(table, query = '') {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const page = await restPublic(`${table}?select=*${query}`, {
+        headers: { Range: `${from}-${from + 999}` },
+      });
+      out.push(...page);
+      if (page.length < 1000) break;
+    }
+    return out;
+  }
+
   // ── Lecturas con caché (mismo SibraCache que el resto) ──
   const cache = (typeof SibraCache !== 'undefined') ? SibraCache
     : { get: () => null, set: () => {}, invalidate: () => {} };
@@ -211,6 +235,7 @@ const SibraMaestros = (() => {
 
   return {
     SUPABASE_URL, sessionEmail, login, logout, ensureLogin, rest, selectAll,
+    restPublic, selectAllPublic,
     papeles, modelos, clientes, papelesDict, modelosPorPerfil, replaceTable, invalidate,
   };
 })();

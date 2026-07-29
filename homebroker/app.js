@@ -475,12 +475,15 @@ async function exportSheet(kind) {
   } catch (e) { toast('Error al exportar: ' + e.message); }
 }
 
+// Tenencias/cauciones: Supabase primero (brokers_tenencias/brokers_cauciones,
+// espejo que el backend pisa cada ciclo), fallback a Sheets si Supabase no
+// responde — misma lógica que ya usan actual/rotaciones/propuestas/chicas
+// (ver SibraBrokers.snapshotRows en shared/sibra-brokers-data.js). Mismas
+// columnas (broker_code/account/client_name/...) en ambas fuentes.
 async function load(fresh = false) {
-  const holdings = await sheetValues(TENENCIAS_SHEET_ID, 'CURRENT', { fresh });
-  allRows = rowsFromValues(holdings.values);
+  allRows = await SibraBrokers.snapshotRows('brokers_tenencias', TENENCIAS_SHEET_ID, { fresh });
   try {
-    const cauciones = await sheetValues(CAUCIONES_SHEET_ID, 'CURRENT', { fresh });
-    allCauciones = rowsFromValues(cauciones.values);
+    allCauciones = await SibraBrokers.snapshotRows('brokers_cauciones', CAUCIONES_SHEET_ID, { fresh });
   } catch (e) {
     // No dejamos que un problema en Cauciones (sheet nueva, puede no existir
     // todavía o fallar por separado) tumbe también las Tenencias.
@@ -549,4 +552,7 @@ async function showApp() {
   try { await Promise.all([load(), fetchMep()]); } catch (e) { toast('Error: ' + e.message) }
 }
 
-if (SibraAuth.getToken()) showApp();
+// Tenencias/cauciones ya no exigen Google (Supabase primero, ver load()) —
+// arranca directo. exportSheet() sigue pidiendo el token de Google puntual,
+// solo para esa acción ("mandar a mesa" crea un Sheet real de verdad).
+showApp();
