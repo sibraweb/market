@@ -990,10 +990,19 @@ const Senales = {
   },
   async guardar(){
     const b = Senales.borrador||S.senales;
+    const totalFilas = b.venta.length + b.compra.length;
     const rows = [
       ...b.venta.filter(s=>s.ticker).map(s=>({tipo:"VENTA", ticker:s.ticker, valor:s.valor})),
       ...b.compra.filter(s=>s.ticker).map(s=>({tipo:"COMPRA", ticker:s.ticker, valor:s.valor})),
     ];
+    // Si hay filas cargadas pero ninguna tiene ticker (quedó vacío o sin
+    // tipear), avisar CLARO antes de guardar 0 -- si no, "guardar" borra
+    // silenciosamente lo que hubiera sin dejar rastro de por qué.
+    if(totalFilas>0 && rows.length===0){
+      alert("Ninguna fila tiene ticker cargado — no se guardó nada. Completá el ticker de cada fila (o borrala con ✕) y volvé a guardar.");
+      return;
+    }
+    console.log("[Señales] guardando", rows.length, "filas:", rows);
     try{
       await SibraMaestros.replaceTable("market_senales", rows);
       S.senales.venta = b.venta.filter(s=>s.ticker);
@@ -1005,7 +1014,10 @@ const Senales = {
       if(S.tenencia){ Senales.aplicar(S.tenencia); App.render(); }
       toast("Señales guardadas — "+rows.length+" filas"+(S.tenencia?" (reaplicadas al cliente actual)":""));
       UI.renderSenales();
-    }catch(e){ toast("Error al guardar señales: "+e.message, "error"); }
+    }catch(e){
+      console.error("[Señales] error al guardar:", e);
+      alert("Error al guardar señales: "+e.message+"\n\nAbrí la consola del navegador (F12) para ver el detalle completo.");
+    }
   },
 };
 
@@ -1452,12 +1464,18 @@ const UI = {
           <div class="card" style="border-color:var(--blue)"><div class="label">Disponible neto</div><div class="value" style="font-size:13px;color:var(--blue)">${fmt(disp)}</div></div>
         </div>
         <div class="tbl-wrap" style="margin-bottom:12px">
-          <table><thead><tr><th>Ticker</th><th>Tiene</th><th>% Vender</th><th>Vende</th><th>Queda</th><th>PU</th><th>Monto</th><th>Comisión</th><th>Neto</th></tr></thead>
-          <tbody>${ventas.length===0?`<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:20px">Sin tenencias</td></tr>`:
+          <table><thead><tr><th>Ticker</th><th>Tiene</th><th>% Neto</th><th>% Bruto</th><th>% Vender</th><th>Vende</th><th>Queda</th><th>PU</th><th>Monto</th><th>Comisión</th><th>Neto</th></tr></thead>
+          <tbody>${ventas.length===0?`<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:20px">Sin tenencias</td></tr>`:
             ventas.map(v=>{
               const queda=v.cantActual-v.cantOp;
+              const valorActual=v.cantActual*v.pu;
+              // % Neto = sobre la cartera SIN caución (totalAjustado); % Bruto = CON
+              // caución (totalCartera) -- mismo criterio que market/actual.
+              const pctNeto=totalAjustado>0?valorActual/totalAjustado:0;
+              const pctBruto=totalCartera>0?valorActual/totalCartera:0;
               return `<tr${v.esV?' style="background:var(--red-bg)"':''}>
               <td><b>${v.ticker}</b></td><td>${fmtN(v.cantActual)}</td>
+              <td>${pct(pctNeto)}</td><td style="color:var(--text2)">${pct(pctBruto)}</td>
               <td>${UI.pctCtrl("v",v.ticker,v.pEj)}</td>
               <td style="color:var(--red-light);font-weight:700">${v.cantOp?fmtN(v.cantOp):"—"}</td>
               <td>${fmtN(queda)}</td>
