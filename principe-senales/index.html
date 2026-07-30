@@ -10,6 +10,7 @@
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
 <script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-autorefresh.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 /* ── Design system SIBRATECH, tema OSCURO ─────────────────────────────
@@ -206,7 +207,7 @@ tr:hover td{background:#0d1117}
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
         <span id="precio-tc" style="font-size:10px;color:var(--text3)">TC: —</span>
         <span id="precio-hora" style="font-size:10px;color:var(--text3)"></span>
-        <button class="btn btn-ghost" style="padding:4px 10px;font-size:9px" onclick="App.actualizarPrecios()">↻ Precios</button>
+        <button class="btn btn-red" style="padding:8px 18px;font-size:11px" onclick="App.actualizarPrecios()">↻ ACTUALIZAR PRECIOS</button>
       </div>
     </div>
   </div>
@@ -1091,8 +1092,18 @@ const App = {
     UI.initSelectores();
     hideLoad();
     toast("Sistema listo — "+S.clientes.length+" clientes");
+
+    // Precios en vivo cada 20s (ver shared/sibra-autorefresh.js: se saltea
+    // solo si la pestaña está en segundo plano o si el operador está
+    // tipeando, para no robarle el foco a mitad de una cantidad).
+    SibraAutoRefresh.iniciar(async () => {
+      await Precios.cargarTodos();
+      if(S.clienteActual) App.render();
+    });
   },
 
+  // Manual (botón "↻ ACTUALIZAR PRECIOS"): sí muestra spinner, es una
+  // acción del usuario. El ciclo automático usa la versión silenciosa.
   async actualizarPrecios(){
     showLoad("Actualizando precios..."); await Precios.cargarTodos(); hideLoad();
     if(S.clienteActual) App.render();

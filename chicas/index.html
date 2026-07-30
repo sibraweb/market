@@ -524,6 +524,7 @@ th:hover { background:var(--bg4); }
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
 <script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-autorefresh.js"></script>
 <script>
 // ═══════════════════════════════════════════
 //  CONFIG
@@ -721,13 +722,20 @@ async function registrarOperacion(tipo, alyc, comitente, ticker, cantidad, preci
 // ═══════════════════════════════════════════
 //  DATA912 — PRECIOS
 // ═══════════════════════════════════════════
-async function fetchPrices() {
+// `silencioso`: para el refresco automático cada 20s (ver
+// shared/sibra-autorefresh.js) — mismo trabajo sin llenar el log.
+async function fetchPrices(silencioso = false) {
   const panels=[
     ['arg_stocks','ACCION'],['arg_cedears','CEDEAR'],
     ['arg_bonds','RENTA_FIJA'],['arg_notes','RENTA_FIJA'],['arg_corp','ON'],
   ];
-  setStatus('precios','loading','Descargando...');
-  log('📡 Descargando precios Data912...');
+  const logSi = (msg, cls) => { if (!silencioso) log(msg, cls); };
+  if (!silencioso) setStatus('precios','loading','Descargando...');
+  logSi('📡 Descargando precios Data912...');
+  // Índice NUEVO en cada corrida: con push() sobre el índice viejo, al
+  // refrescar se acumulaban entradas y getPrice() devolvía la PRIMERA (la
+  // más vieja) -- precios congelados y memoria creciendo.
+  priceIndex = {};
   for(const [panel] of panels) {
     try {
       const r=await fetch(`${DATA912}/${panel}`);
@@ -742,14 +750,14 @@ async function fetchPrices() {
         if(!priceIndex[sym]) priceIndex[sym]=[];
         priceIndex[sym].push({price,panel});
       });
-      log(`  ✓ ${panel}:${rows.length} tickers`,'log-ok');
-    } catch(e){ log(`  ⚠ ${panel}: ${e.message}`,'log-warn'); }
+      logSi(`  ✓ ${panel}:${rows.length} tickers`,'log-ok');
+    } catch(e){ logSi(`  ⚠ ${panel}: ${e.message}`,'log-warn'); }
   }
   const total=Object.keys(priceIndex).length;
   setStatus('precios','ok',`${total} tickers`);
   $('kpiPrecios').textContent=total;
   $('kpiRow').style.display='';
-  log(`✅ Precios: ${total} tickers`,'log-ok');
+  logSi(`✅ Precios: ${total} tickers`,'log-ok');
 }
 
 // Tipo de cambio MEP = AL30 (pesos) / AL30D (dólares), igual que
@@ -1675,6 +1683,14 @@ function showToast() {
 initNav();
 restoreToken();
 checkDailyReset();
+
+// Precios en vivo cada 20s (ver shared/sibra-autorefresh.js). Solo repinta
+// si ya hay posiciones cargadas; se saltea si el operador está tipeando.
+SibraAutoRefresh.iniciar(async () => {
+  if (!posiciones.length) return;
+  await fetchPrices(true);
+  try { renderVentas(); renderCompras(); } catch (e) { console.warn('[auto-refresh]', e); }
+});
 </script>
 </body>
 </html>

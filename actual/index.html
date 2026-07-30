@@ -12,6 +12,7 @@
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
 <script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-autorefresh.js"></script>
 <style>
 :root {
   --red: #E10600;
@@ -1956,7 +1957,10 @@ async function cargarMaestros(fresh = false) {
 // ══════════════════════════════════════════
 const DATA912 = 'https://data912.com/live';
 
-async function fetchPrices() {
+// `silencioso`: para el refresco automático cada 20s (ver
+// shared/sibra-autorefresh.js) — hace el mismo trabajo pero sin escribir
+// en el log de proceso, que si no se llenaría de 6 líneas por minuto.
+async function fetchPrices(silencioso = false) {
   const panels = [
     ['arg_stocks',  'ACCION_ARG'],
     ['arg_cedears', 'CEDEAR'],
@@ -1964,8 +1968,15 @@ async function fetchPrices() {
     ['arg_notes',   'RENTA_FIJA'],
     ['arg_corp',    'ON'],
   ];
-  setSourceStatus('precios', 'loading', 'Descargando paneles...');
-  log('📡 Descargando precios Data912...', 'log-ok');
+  const logSi = (msg, cls) => { if (!silencioso) log(msg, cls); };
+  if (!silencioso) setSourceStatus('precios', 'loading', 'Descargando paneles...');
+  logSi('📡 Descargando precios Data912...', 'log-ok');
+  // Índice NUEVO en cada corrida: antes se hacía push() sobre el índice
+  // viejo, así que al refrescar los precios se acumulaban entradas por
+  // ticker y getPrice() seguía devolviendo la PRIMERA (la más vieja). Con
+  // el refresco automático cada 20s eso daba precios congelados y memoria
+  // creciendo sin límite.
+  S.priceIndex = {};
   for (const [panel, tipo] of panels) {
     try {
       const r = await fetch(`${DATA912}/${panel}`);
@@ -1980,9 +1991,9 @@ async function fetchPrices() {
         if (!S.priceIndex[sym]) S.priceIndex[sym] = [];
         S.priceIndex[sym].push({ price, panel, tipo });
       });
-      log(`  ✓ ${panel}: ${rows.length} tickers`, 'log-ok');
+      logSi(`  ✓ ${panel}: ${rows.length} tickers`, 'log-ok');
     } catch(e) {
-      log(`  ⚠ ${panel}: ${e.message}`, 'log-warn');
+      logSi(`  ⚠ ${panel}: ${e.message}`, 'log-warn');
     }
   }
   setSourceStatus('precios', 'ok', Object.keys(S.priceIndex).length + ' tickers indexados');
@@ -3231,6 +3242,15 @@ function init() {
     initAC();
     const cid = localStorage.getItem('sibra_client_id');
     if (cid && $('cfgClientId')) $('cfgClientId').value = cid;
+    // Precios en vivo cada 20s (ver shared/sibra-autorefresh.js). Solo
+    // repinta si ya hay posiciones cargadas — sin datos no hay nada que
+    // actualizar y no vale la pena pegarle a data912.
+    SibraAutoRefresh.iniciar(async () => {
+      if (!S.posiciones || !S.posiciones.length) return;
+      await fetchPrices(true);
+      try { renderCartaGlobal(); } catch (e) { console.warn('[auto-refresh] renderCartaGlobal:', e); }
+      try { actualizarDashboard(); } catch (e) { console.warn('[auto-refresh] actualizarDashboard:', e); }
+    });
     console.log('[SIBRA] App inicializado OK. driveAuth:', typeof driveAuth);
   } catch(e) {
     console.error('[SIBRA] Error en init():', e);

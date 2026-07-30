@@ -529,3 +529,9 @@ async function showApp() {
 // arranca directo. exportSheet() sigue pidiendo el token de Google puntual,
 // solo para esa acción ("mandar a mesa" crea un Sheet real de verdad).
 showApp();
+
+// MEP + tenencias en vivo cada 20s (ver shared/sibra-autorefresh.js). Se
+// saltea si la pestaña está en segundo plano o hay un filtro con foco.
+SibraAutoRefresh.iniciar(async () => {
+  await Promise.all([load(true), fetchMep()]);
+});
