@@ -217,6 +217,7 @@ tr:hover td{background:#0d1117}
 
   <div style="padding:0 24px;background:var(--bg)">
     <div class="tabs">
+      <button class="tab" id="tab-senales" onclick="UI.setTab('senales')">00 · Señales</button>
       <button class="tab active" id="tab-inicial" onclick="UI.setTab('inicial')">01 · Cartera Inicial</button>
       <button class="tab" id="tab-objetivo" onclick="UI.setTab('objetivo')">02 · Cartera Objetivo (a comprar)</button>
       <button class="tab" id="tab-operaciones" onclick="UI.setTab('operaciones')">03 · Operaciones</button>
@@ -224,6 +225,7 @@ tr:hover td{background:#0d1117}
   </div>
 
   <div id="content">
+    <div id="pane-senales" style="display:none"></div>
     <div id="pane-inicial"></div>
     <div id="pane-objetivo" style="display:none"></div>
     <div id="pane-operaciones" style="display:none">
@@ -297,6 +299,10 @@ const S = {
   // Principe Senales: la cartera objetivo NO sale de un modelo — se tipea.
   // Cada item: {ticker, cantidad}. El precio se resuelve con Precios.get().
   manual: [],
+  // Señales (market_senales, Supabase): lista persistida, editada en la
+  // pestaña "00 · Señales". Se cargan UNA vez al iniciar (no por cliente) y
+  // se aplican en selCliente() para prellenar pctV/manual — ver Senales.aplicar.
+  senales: { venta: [], compra: [] },
   tenencias: {},   // { "alyc|cc": { cashPesos, cashUSD, caucionPesos, posiciones } }
   alycSel: null, clienteActual: null, tenencia: null, objetivo: {},
   tab: "inicial",
@@ -884,6 +890,114 @@ const Calc = {
 };
 
 // ══════════════════════════════════════════════════════
+//  SEÑALES — lista persistida de venta/compra (market_senales, Supabase),
+//  editada en la pestaña "00 · Señales". Se cargan UNA vez al iniciar (no
+//  por cliente) y se aplican en selCliente() para prellenar pctV/manual.
+//  El operador puede seguir ajustando cualquier valor a mano después de
+//  aplicadas — esto es solo el punto de partida, no un bloqueo.
+// ══════════════════════════════════════════════════════
+const Senales = {
+  async cargar(){
+    try{
+      const rows = await SibraMaestros.selectAll("market_senales");
+      S.senales.venta  = rows.filter(r=>r.tipo==="VENTA")
+        .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0}));
+      S.senales.compra = rows.filter(r=>r.tipo==="COMPRA")
+        .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0}));
+    }catch(e){
+      console.warn("[Señales] no se pudieron cargar:", e.message);
+    }
+  },
+
+  // Venta: % de la TENENCIA ACTUAL de ese ticker (0 si el cliente no lo
+  // tiene — Calc.ventas ya solo itera ten.posiciones, así que un ticker sin
+  // tenencia simplemente no genera fila; no hace falta caso especial).
+  // Compra: % TOPE de la cartera (títulos+cash, misma base que el resto del
+  // módulo) — se sugiere la cantidad que falta para LLEGAR a ese tope, neta
+  // de lo que la propia señal de venta ya esté liquidando de ese ticker.
+  // Sin precio en data912 no se puede sugerir cantidad: se omite (el
+  // operador la carga a mano si hace falta, igual que cualquier ticker
+  // manual) en vez de dejar una fila con cantidad 0 silenciosa.
+  aplicar(ten){
+    S.pctV = {};
+    S.senales.venta.forEach(s=>{ S.pctV[s.ticker]=s.valor; });
+
+    const ventasPreview = Calc.ventas(ten, S.pctV, S.comV, S.gasV);
+    const postVenta = {};
+    ventasPreview.forEach(v=>{ postVenta[v.ticker]=v.cantActual-v.cantOp; });
+
+    const { base } = Calc.base(ten, S.aporteARS, S.aporteUSD, S.clienteActual?.palanca||0);
+
+    S.manual = S.senales.compra.map(s=>{
+      const pu = Precios.get(s.ticker)||0;
+      if(pu<=0) return null;
+      const pos = ten.posiciones.find(p=>p.ticker===s.ticker);
+      const cantidadPost = postVenta[s.ticker]!==undefined ? postVenta[s.ticker] : (pos?pos.cantidad:0);
+      const valorActual = cantidadPost*pu;
+      const valorTope = base*s.valor;
+      const faltante = Math.max(0, valorTope-valorActual);
+      const cantidad = fl(faltante/pu);
+      return cantidad>0 ? {ticker:s.ticker, cantidad} : null;
+    }).filter(Boolean);
+  },
+
+  // ── Editor de la pestaña "00 · Señales" — reemplazo total al guardar
+  //    (mismo criterio que markets-repo/maestros: las señales se modifican
+  //    todo el tiempo, no se acumulan). Cambios en pantalla NO se aplican a
+  //    los pctV/manual del cliente actual hasta volver a entrar a ese
+  //    cliente (Senales.aplicar corre en selCliente, no acá).
+  borrador: null, // {venta:[...], compra:[...]} mientras se edita; null = usar S.senales
+
+  renderTabla(tipo){
+    const lista = (Senales.borrador||S.senales)[tipo];
+    const rows = lista.map((s,i)=>`<tr>
+      <td><input class="input-field" style="text-transform:uppercase" value="${s.ticker}"
+            onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)"/></td>
+      <td style="width:110px"><input class="input-field pct-input" type="number" min="0" step="1"
+            value="${Math.round(s.valor*100)}"
+            onchange="Senales.setCampo('${tipo}',${i},'valor',Math.max(0,Number(this.value)/100))"/></td>
+      <td style="width:40px"><button class="btn btn-ghost" style="padding:4px 8px" onclick="Senales.borrarFila('${tipo}',${i})">✕</button></td>
+    </tr>`).join("");
+    return `<div class="tbl-wrap" style="margin-bottom:10px">
+      <table><thead><tr><th style="text-align:left">Ticker</th><th>${tipo==="venta"?"% a vender":"% tope de cartera"}</th><th></th></tr></thead>
+      <tbody>${rows||`<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:16px">Sin señales de ${tipo}</td></tr>`}</tbody></table>
+    </div>
+    <button class="btn btn-ghost" onclick="Senales.agregarFila('${tipo}')">+ Agregar ${tipo==="venta"?"venta":"compra"}</button>`;
+  },
+  setCampo(tipo,i,campo,val){
+    if(!Senales.borrador) Senales.borrador=JSON.parse(JSON.stringify(S.senales));
+    const item=Senales.borrador[tipo][i];
+    item[campo]=campo==="ticker"?String(val).trim().toUpperCase():val;
+    UI.renderSenales();
+  },
+  agregarFila(tipo){
+    if(!Senales.borrador) Senales.borrador=JSON.parse(JSON.stringify(S.senales));
+    Senales.borrador[tipo].push({ticker:"", valor:tipo==="venta"?0:0});
+    UI.renderSenales();
+  },
+  borrarFila(tipo,i){
+    if(!Senales.borrador) Senales.borrador=JSON.parse(JSON.stringify(S.senales));
+    Senales.borrador[tipo].splice(i,1);
+    UI.renderSenales();
+  },
+  async guardar(){
+    const b = Senales.borrador||S.senales;
+    const rows = [
+      ...b.venta.filter(s=>s.ticker).map(s=>({tipo:"VENTA", ticker:s.ticker, valor:s.valor})),
+      ...b.compra.filter(s=>s.ticker).map(s=>({tipo:"COMPRA", ticker:s.ticker, valor:s.valor})),
+    ];
+    try{
+      await SibraMaestros.replaceTable("market_senales", rows);
+      S.senales.venta = b.venta.filter(s=>s.ticker);
+      S.senales.compra = b.compra.filter(s=>s.ticker);
+      Senales.borrador = null;
+      toast("Señales guardadas — "+rows.length+" filas");
+      UI.renderSenales();
+    }catch(e){ toast("Error al guardar señales: "+e.message, "error"); }
+  },
+};
+
+// ══════════════════════════════════════════════════════
 //  APP
 // ══════════════════════════════════════════════════════
 const App = {
@@ -892,6 +1006,7 @@ const App = {
     try{ await Datos.cargarClientes(); }
     catch(e){ hideLoad(); errBox("Error cargando clientes",e.message); return; }
 
+    await Senales.cargar(); // no-fatal, ver Senales.cargar
 
     showLoad("Cargando precios live...");
     await Precios.cargarTodos(); // no-fatal
@@ -910,13 +1025,14 @@ const App = {
     S.clienteActual=cliente; S.alycSel=cliente.alyc;
     S.aporteARS=0; S.aporteUSD=0; S.palancaAjuste=null;
     S.pctV={}; S.pctC={}; S.tenencia=null;
-    S.manual=[];   // cada cliente arranca con la lista de compras vacia
+    S.manual=[];   // se prellena abajo desde señales (Senales.aplicar); si no hay señales, queda vacío
     // Usar caché si ya se cargaron todas las tenencias (clave alyc|cc, ver nota
     // en _agruparTenencias sobre por qué no alcanza con cc solo)
     const tenKey=`${cliente.alyc}|${normCC(cliente.cc)}`;
     if(S.tenencias[tenKey]){
       const ten=Datos._refrescarPrecios(S.tenencias[tenKey]);
       S.tenencia=ten;
+      Senales.aplicar(ten);
       UI.setTab("inicial"); App.render();
       return;
     }
@@ -925,6 +1041,7 @@ const App = {
       const ten=Datos._refrescarPrecios(await Datos.cargarTenencia(cliente.alyc,cliente.cc));
       S.tenencias[tenKey]=ten;
       S.tenencia=ten; hideLoad();
+      Senales.aplicar(ten);
       UI.setTab("inicial"); App.render();
     }catch(e){
       hideLoad(); toast("Error tenencia: "+e.message,"error"); console.error(e);
@@ -1125,13 +1242,50 @@ const UI = {
 
   setTab(tab){
     S.tab=tab;
+    $("tab-senales").className="tab"+(tab==="senales"?" active":"");
     $("tab-inicial").className="tab"+(tab==="inicial"?" active":"");
     $("tab-objetivo").className="tab"+(tab==="objetivo"?" active":"");
     $("tab-operaciones").className="tab"+(tab==="operaciones"?" active":"");
+    $("pane-senales").style.display=tab==="senales"?"block":"none";
     $("pane-inicial").style.display=tab==="inicial"?"block":"none";
     $("pane-objetivo").style.display=tab==="objetivo"?"block":"none";
     $("pane-operaciones").style.display=tab==="operaciones"?"block":"none";
     if(tab==="operaciones") Ops.init();
+    if(tab==="senales") UI.renderSenales();
+  },
+
+  renderSenales(){
+    const hayCambios = !!Senales.borrador;
+    $("pane-senales").innerHTML = `
+    <div class="grid2">
+      <div>
+        <div class="section-title">Señales de venta</div>
+        <p style="font-size:11px;color:var(--text3);margin:-4px 0 10px">
+          % de la TENENCIA ACTUAL de cada cliente a vender. Si un cliente no
+          tiene el ticker, no aparece en su "Qué vender" — no hace falta
+          nada especial, es 0% de lo que no tiene.
+        </p>
+        ${Senales.renderTabla("venta")}
+      </div>
+      <div>
+        <div class="section-title">Señales de compra</div>
+        <p style="font-size:11px;color:var(--text3);margin:-4px 0 10px">
+          % TOPE de la cartera total (títulos+cash) que ese ticker debería
+          alcanzar. Se sugiere la cantidad que falta para llegar al tope —
+          si ya está en el tope o por encima, no sugiere nada.
+        </p>
+        ${Senales.renderTabla("compra")}
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+      ${hayCambios?`<span style="font-size:11px;color:var(--red-light);align-self:center">Cambios sin guardar</span>`:""}
+      <button class="btn btn-red" onclick="Senales.guardar()">💾 Guardar señales</button>
+    </div>
+    <p style="font-size:10px;color:var(--text3);margin-top:10px">
+      Guardar reemplaza la lista completa (se editan, no se acumulan). Los
+      cambios se aplican a un cliente recién la próxima vez que lo
+      selecciones — si ya estás mirando uno, volvé a elegirlo.
+    </p>`;
   },
 
   // Sin tope superior: permite sobreponderar (>100%) tanto en ventas como en

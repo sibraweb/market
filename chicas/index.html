@@ -520,8 +520,6 @@ th:hover { background:var(--bg4); }
 </main>
 
 <div id="toast">✓ Enviado — pegalo en WhatsApp</div>
-<input type="file" id="fileInput" style="display:none;" accept=".xlsx,.xls" />
-
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
@@ -628,28 +626,6 @@ function updateDriveUI(ok) {
 // ═══════════════════════════════════════════
 //  DRIVE API
 // ═══════════════════════════════════════════
-async function driveGet(path,params={}) {
-  if(!token) throw new Error('Sin token');
-  const url=new URL('https://www.googleapis.com/drive/v3/'+path);
-  Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
-  const r=await fetch(url,{headers:{Authorization:'Bearer '+token}});
-  if(!r.ok) throw new Error(`Drive API ${r.status}`);
-  return r.json();
-}
-async function driveDownload(fileId) {
-  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,{headers:{Authorization:'Bearer '+token}});
-  if(!r.ok) throw new Error(`Drive download ${r.status}`);
-  return r.arrayBuffer();
-}
-async function ultimoArchivo(folderId) {
-  const data=await driveGet('files',{
-    q:`'${folderId}' in parents and trashed=false and (name contains '.xlsx' or name contains '.xls')`,
-    orderBy:'modifiedTime desc',pageSize:'5',fields:'files(id,name,modifiedTime)',
-  });
-  if(!data.files?.length) throw new Error('No hay archivos Excel en la carpeta');
-  return data.files[0];
-}
-
 // ═══════════════════════════════════════════
 //  SHEETS API
 // ═══════════════════════════════════════════
@@ -869,17 +845,6 @@ async function cargarTodo() {
   await fetchPrices();
   await cargarOperacionesSheets();
   log(`✅ Listo. ${posiciones.length} posiciones totales.`,'log-ok');
-}
-
-function pickClientesLocal() {
-  const input=$('fileInput');
-  input.onchange=async()=>{
-    const file=input.files[0]; if(!file) return;
-    parseClientes(await file.arrayBuffer());
-    setStatus('clientes','ok',`${clientes.length} clientes (local)`);
-    input.value='';
-  };
-  input.click();
 }
 
 // ═══════════════════════════════════════════

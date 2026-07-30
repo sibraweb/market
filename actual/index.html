@@ -1915,16 +1915,6 @@ async function confirmDrivePick() {
 }
 
 // ── Drive folder helpers ──
-async function archivoMasRecienteDeCarpeta(folderId) {
-  const data = await driveGet('files', {
-    q: `'${folderId}' in parents and trashed = false and (mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='application/vnd.ms-excel' or name contains '.xlsx' or name contains '.xls')`,
-    orderBy: 'modifiedTime desc', pageSize: '5',
-    fields: 'files(id,name,modifiedTime,mimeType)',
-  });
-  if (!data.files || data.files.length === 0) throw new Error('No hay archivos Excel en esta carpeta');
-  return data.files[0];
-}
-
 // Maestros desde Supabase (tablas market_papeles/market_modelos/market_clientes,
 // se editan en ../maestros/). Reemplaza la carga por Excel de Drive: los Excel
 // de las carpetas de Drive quedaron como respaldo histórico, ya no se leen.

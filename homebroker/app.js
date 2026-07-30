@@ -23,33 +23,6 @@ async function connect() {
 
 function logout() { SibraAuth.logout(); location.reload(); }
 
-async function sheetValues(sheetId, range, { fresh = false } = {}) {
-  const token = SibraAuth.getToken();
-  if (!token) throw new Error('No hay token. Conectate con Google primero.');
-  const cacheKey = `sheet_${sheetId}_${range}`;
-  if (!fresh) {
-    const cached = SibraCache.get(cacheKey, SHEET_CACHE_TTL);
-    if (cached) return cached;
-  }
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`;
-  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-  if (!r.ok) throw new Error(`Sheets API error ${r.status}: ${await r.text()}`);
-  const data = await r.json();
-  SibraCache.set(cacheKey, data);
-  return data;
-}
-
-function rowsFromValues(values) {
-  if (!values || !values.length) return [];
-  const headers = values[0];
-  return values.slice(1).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] ?? ''])));
-}
-
-// ══════════════════════════════════════════
-//  MEP (dólar bolsa) — AL30 (ARS) / AL30D (USD), ambos como vienen de data912
-//  (sin dividir por 100: ese ajuste es para mostrar precio "por cada 100
-//  nominales" en otras pantallas, no aplica al cociente del MEP)
-// ══════════════════════════════════════════
 async function fetchMep() {
   try {
     const r = await fetch(DATA912_URL, { headers: { Accept: 'application/json' } });
