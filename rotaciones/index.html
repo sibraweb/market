@@ -826,10 +826,42 @@ const Calc = {
   //    campo que muestra el semáforo EN REGLA/SOBRE-APALANCADA) para
   //    reconocer ese nivel y liberar el disponible correspondiente. No es
   //    automático: solo se mueve cuando el operador toca el campo.
+  // ── DISPONIBLE PARA COMPRAR ────────────────────────────────────────
+  //
+  //   disponible = efectivo + caución real + producido de ventas
+  //                + aportes + deltaCaución
+  //
+  // POR QUÉ SE SUMA LA CAUCIÓN REAL (esto es lo que se venía calculando
+  // mal): el efectivo que informa el broker YA TIENE DESCONTADA la caución
+  // tomada. No son dos cosas distintas -- el saldo negativo de la cuenta
+  // corriente ES la caución. Verificado con datos reales (ADCAP 230760,
+  // 2026-07-30):
+  //     efectivo ARS  -5.721.983  ·  caución tomadora ARS  5.720.506
+  //     efectivo USD    -34.047,95 ·  caución tomadora USD    34.045,76
+  // Coinciden al peso. Si se suma el efectivo sin devolverle la caución, se
+  // está restando dos veces la misma deuda: daba disponible NEGATIVO por
+  // decenas de millones y "saldo insuficiente" aunque el cliente no hubiera
+  // operado nada y estuviera EN REGLA con su apalancamiento.
+  //
+  // Dicho de otro modo, y en la terminología de los otros módulos
+  // (`brutaCliente = netaCliente + caucionTotalARS`):
+  //   · cartera NETA  = títulos + efectivo            (patrimonio real)
+  //   · cartera BRUTA = neta + caución                (lo que se opera)
+  //   · disponible    = la parte líquida de la bruta + lo que libere
+  //                     vendiendo + el margen de caución que se decida usar
+  //
+  // deltaCaucion (de Calc.base) es ese margen: cuánto MÁS (o menos) caución
+  // que la ya tomada permite el % de apalancamiento.
+  //  - Positivo (caución real por debajo del %): plata extra para comprar.
+  //  - Negativo (caución real por ENCIMA del %): resta del disponible.
+  // Nada de esto se mueve solo: el operador sube o baja el % a mano (mismo
+  // campo del semáforo EN REGLA / SOBRE-APALANCADA).
   disponible(ventas, ten, aARS, aUSD, deltaCaucion){
     const tc=S.tipoCambio||0;
     const cashTotal=ten.cashPesos+(ten.cashUSD||0)*tc;
-    return ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0)+cashTotal+aARS+(aUSD*tc)+(deltaCaucion||0);
+    const caucionReal=ten.caucionPesos+(ten.caucionUSD||0)*tc;
+    const producidoVentas=ventas.filter(v=>v.esV).reduce((s,v)=>s+v.neto,0);
+    return producidoVentas + cashTotal + caucionReal + aARS + (aUSD*tc) + (deltaCaucion||0);
   },
 
   compras(ten, ventas, obj, base, pctC, comC, gasC){

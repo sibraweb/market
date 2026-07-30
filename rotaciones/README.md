@@ -50,12 +50,35 @@ efectivamente hay.
 > caución real **y** multiplicar por (1+palanca). Con títulos $100, caución
 > real $50 y palanca 30%, daba base $195 en vez de $130.
 
+### Las tres cifras: neta, bruta y disponible
+
+```
+cartera NETA  = títulos + efectivo                    ← patrimonio real del cliente
+cartera BRUTA = neta + caución (ARS + USD al MEP)     ← lo que efectivamente se opera
+disponible    = efectivo + caución real
+              + producido de ventas (neto de comisiones y gastos)
+              + aportes
+              + deltaCaución
+```
+
+> **El efectivo que informa el broker ya tiene descontada la caución
+> tomada** — no son dos cosas distintas: el saldo negativo de la cuenta
+> corriente **es** la caución. Verificado con datos reales (ADCAP 230760,
+> 2026-07-30): efectivo ARS −5.721.983 contra caución ARS 5.720.506, y
+> efectivo USD −34.047,95 contra caución USD 34.045,76. Coinciden al peso.
+>
+> Por eso el disponible **suma la caución real**: si no, se resta dos veces
+> la misma deuda. Ese era el bug — daba disponible negativo por decenas de
+> millones y "saldo insuficiente" con el cliente sin operar nada y EN REGLA
+> con su apalancamiento. Con los datos de arriba: **−$57.093.840 antes,
+> −$32.328 después** (ese resto chico sí es real: está levemente
+> sobre-apalancado).
+
 ### La caución entra por la diferencia contra lo acordado
 
 ```
 caucionTeorica = base × palanca          ← palanca es el % acordado (tabla o override manual)
 deltaCaucion   = caucionTeorica − caucionReal
-disponible     = ventas netas + cash + aportes + deltaCaucion
 ```
 
 - **deltaCaucion positivo** (se tomó menos caución de la permitida): suma
