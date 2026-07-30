@@ -13,6 +13,7 @@
 <script src="../shared/sibra-brokers-data.js"></script>
 <script src="../shared/sibra-maestros.js"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
+<script src="../shared/sibra-discrepancia.js"></script>
 <style>
 :root {
   --red: #E10600;
@@ -2192,6 +2193,19 @@ async function loadData(fresh = false) {
     try { renderCartaGlobal(); } catch (e) { console.warn('[actual] renderCartaGlobal:', e); }
     try { actualizarDashboard(); } catch (e) { console.warn('[actual] actualizarDashboard:', e); }
     log(`✅ ${S.posiciones.length} posiciones de ${S.clientes.length} cuentas cargadas desde la base.`, 'log-ok');
+    // Control de valuación: nuestra cuenta (cantidad × data912) vs. la del
+    // broker. Si difiere >5% abre el detalle -- casi siempre es un precio
+    // mal escalado o una tenencia mal cargada (ver shared/sibra-discrepancia.js).
+    try {
+      const res = SibraDiscrepancia.verificar(
+        S.posiciones.map(p => ({
+          ticker: p.ticker, cantidad: p.tenencia, valorBroker: p.valorBase,
+          esEfectivo: ['PESOS','USD_MEP','USD_DIVISA','USD_CABLE'].includes(p.ticker),
+        })),
+        t => getPrecioUnitario(t, clasificarTicker(t, S.allocation[t])),
+        'cartera global');
+      if (res.superaUmbral) log(`⚠ Valuación difiere ${(res.difTotal*100).toFixed(2)}% de la del broker — revisar precios/tenencias.`, 'log-warn');
+    } catch (e) { console.warn('[actual] control de discrepancia:', e); }
   } catch (e) {
     log('❌ Error cargando desde la base: ' + e.message, 'log-err');
     console.error('[actual] loadData:', e);

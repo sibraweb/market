@@ -11,6 +11,7 @@
 <script src="../shared/sibra-brokers-data.js"></script>
 <script src="../shared/sibra-maestros.js"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
+<script src="../shared/sibra-discrepancia.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -921,6 +922,7 @@ const App = {
       const ten=Datos._refrescarPrecios(S.tenencias[tenKey]);
       S.tenencia=ten;
       UI.setTab("inicial"); App.render();
+      App.avisarDiscrepancia(ten, cliente);
       return;
     }
     showLoad(`Cargando tenencia de ${cliente.cliente}...`);
@@ -929,9 +931,27 @@ const App = {
       S.tenencias[tenKey]=ten;
       S.tenencia=ten; hideLoad();
       UI.setTab("inicial"); App.render();
+      App.avisarDiscrepancia(ten, cliente);
     }catch(e){
       hideLoad(); toast("Error tenencia: "+e.message,"error"); console.error(e);
     }
+  },
+
+  // Ventana de alerta al TRAER la cartera si nuestra valuación difiere de la
+  // del broker más del umbral -- antes solo se veía como un warn-box en la
+  // pestaña 02 y bloqueaba el guardado, o sea que se descubría recién al
+  // final. Acá se avisa apenas se carga el cliente, con el detalle por
+  // ticker para saber si es un precio mal escalado o una tenencia mal.
+  avisarDiscrepancia(ten, cliente){
+    try{
+      if((ten.discrepanciaPct||0) <= CFG.DISCREPANCIA_MAX_PCT) return;
+      SibraDiscrepancia.mostrar(
+        SibraDiscrepancia.analizar(
+          ten.posiciones.map(p=>({ticker:p.ticker, cantidad:p.cantidad, valorBroker:p.valorBroker})),
+          t => Precios.get(t),
+          CFG.DISCREPANCIA_MAX_PCT),
+        `${cliente.cliente} · ${cliente.alyc} ${cliente.cc}`);
+    }catch(e){ console.warn("[rotaciones] aviso de discrepancia:", e); }
   },
 
   // Ajuste del % de apalancamiento -- se puede mover en cualquier momento para

@@ -525,6 +525,7 @@ th:hover { background:var(--bg4); }
 <script src="../shared/sibra-brokers-data.js"></script>
 <script src="../shared/sibra-maestros.js"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
+<script src="../shared/sibra-discrepancia.js"></script>
 <script>
 // ═══════════════════════════════════════════
 //  CONFIG
@@ -822,6 +823,15 @@ async function cargarTenenciasSheet(fresh=false) {
     actualizarSelectores();
     $('kpiPos').textContent=posiciones.length;
     $('kpiRow').style.display='';
+    // Control de valuación contra la del broker (>5% abre el detalle). Se
+    // usa `filas` y no `posiciones` porque acá solo `filas` trae el
+    // market_value_ars con el que hay que comparar.
+    try {
+      const res = SibraDiscrepancia.verificar(
+        filas.map(f => ({ ticker:f.ticker, cantidad:f.cantidad, valorBroker:f.valor, esEfectivo:f.esEfectivo })),
+        getPrice, 'tenencias ADCAP+IEB+BCCH');
+      if (res.superaUmbral) log(`⚠ Valuación difiere ${(res.difTotal*100).toFixed(2)}% de la del broker — revisar precios/tenencias.`,'log-warn');
+    } catch(e){ console.warn('[chicas] control de discrepancia:', e); }
   } catch(e){
     setStatus('tenencias','error','Error: '+e.message);
     log('❌ Tenencias: '+e.message,'log-err');
