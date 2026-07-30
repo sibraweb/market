@@ -701,13 +701,40 @@ async function cargarOperacionesSheets(fresh=false) {
   }
 }
 
+// OPERACIONES DUPLICADAS - no sacar estas dos guardas.
+// Escribir en Sheets tarda, y sin senal de "estoy trabajando" es facil
+// apretar dos veces y cargar la misma orden dos veces (le paso a Juan en
+// rotaciones el 2026-07-30, mismo patron).
+const _opsEnVuelo = new Set();
+
+function _claveOp(tipo, alyc, comitente, ticker, cantidad) {
+  return [tipo, alyc, comitente, ticker, cantidad].join('|');
+}
+
 async function registrarOperacion(tipo, alyc, comitente, ticker, cantidad, precioSpot) {
+  const clave=_claveOp(tipo, alyc, comitente, ticker, cantidad);
+  // (1) misma operacion todavia escribiendose
+  if(_opsEnVuelo.has(clave)) {
+    log('⚠ Ya se esta registrando esa misma operacion - espera','log-err');
+    return;
+  }
+  // (2) misma operacion YA registrada hoy: se avisa y se pide confirmar, en
+  // vez de escribirla callado. Puede ser legitima (dos ordenes iguales), por
+  // eso se pregunta en lugar de bloquear.
+  const yaEsta=operHoy.some(o=>_claveOp(o.tipo,o.alyc,o.comitente,o.ticker,o.cantidad)===clave);
+  if(yaEsta && !confirm(`Ya registraste hoy: ${tipo} ${cantidad} ${ticker} (${comitente}).
+
+¿Es una operacion NUEVA? Aceptar la agrega igual.`)) {
+    return;
+  }
+  _opsEnVuelo.add(clave);
+
   const cli=findCliente(comitente,alyc);
   const cliente=cli?.cliente||comitente;
   const montoARS=cantidad*precioSpot;
   const hoy=fechaHoy();
   const hora=horaAhora();
-  
+
   const row=[hoy,hora,tipo,alyc,comitente,cliente,ticker,cantidad,precioSpot,montoARS];
   try {
     await sheetsAppend([row]);
@@ -717,6 +744,8 @@ async function registrarOperacion(tipo, alyc, comitente, ticker, cantidad, preci
     renderHistorial();
   } catch(e) {
     log('❌ Error guardando en Sheets: '+e.message,'log-err');
+  } finally {
+    _opsEnVuelo.delete(clave);
   }
 }
 

@@ -1242,6 +1242,28 @@ const App = {
   async guardar(){
     const {clienteActual:cl,alycSel:alyc,tenencia}=S;
     if(!cl||!tenencia) return;
+    // ORDENES DUPLICADAS - no sacar esta guarda.
+    // Guardar tarda varios segundos y el boton no daba senal de estar
+    // trabajando: Juan penso que no andaba, apreto de nuevo, y se cargaron
+    // DOS VECES las mismas ordenes (2026-07-30).
+    if(S.guardando){
+      toast("Ya se esta guardando - espera a que termine.","error");
+      return;
+    }
+    S.guardando=true;
+    // El boton se apaga en el acto, sin esperar al proximo render.
+    document.querySelectorAll('[data-btn-guardar]').forEach(b=>{
+      b.disabled=true; b.textContent="Guardando...";
+    });
+    try{
+      await App._guardarInterno(cl,alyc,tenencia);
+    } finally {
+      S.guardando=false;
+      App.render();
+    }
+  },
+
+  async _guardarInterno(cl,alyc,tenencia){
     // Defensa en profundidad: re-chequear la discrepancia de precio acá
     // también, no solo en el botón (que ya queda deshabilitado en render(),
     // pero por si acaso guardar() se llama de otro lado en el futuro).
@@ -1279,7 +1301,7 @@ const App = {
       // clientes dejaba 30 archivos sueltos en Descargas.
       hideLoad();
       toast(`✓ Guardado: ${cl.cliente} — se acumula en "03 · Operaciones"`);
-      App.siguienteCliente();
+      await App.siguienteCliente();
     }catch(e){
       hideLoad();
       toast("Error guardando: "+e.message,"error");
@@ -1287,11 +1309,17 @@ const App = {
     }
   },
 
-  siguienteCliente(){
+  async siguienteCliente(){
     const lista=S.clientes.filter(c=>c.alyc===S.alycSel);
     const idx=lista.findIndex(c=>c.cc===S.clienteActual?.cc);
+    // La tenencia del cliente recién rotado quedó vieja: se invalida para
+    // que, si se vuelve a él, se recargue de verdad.
+    const previo=S.clienteActual;
+    if(previo) delete S.tenencias[`${previo.alyc}|${normCC(previo.cc)}`];
     if(idx>=0&&idx<lista.length-1){
-      App.selCliente(lista[idx+1]);
+      // `await`: sin esperar, el setInputCom corría con el cliente ANTERIOR
+      // y la cartera inicial no se refrescaba.
+      await App.selCliente(lista[idx+1]);
       UI.setInputCom(lista[idx+1]);
     } else {
       S.clienteActual=null; S.tenencia=null;
@@ -1690,7 +1718,7 @@ const UI = {
         </div>
         <div style="display:flex;gap:10px;justify-content:flex-end">
           <button class="btn btn-ghost" onclick="App.pasarSinOperar()">Pasar sin operar →</button>
-          <button class="btn ${ok?"btn-green":"btn-ghost"}" ${ok?"":"disabled"} onclick="App.guardar()">
+          <button class="btn ${ok?"btn-green":"btn-ghost"}" ${ok?"":"disabled"} data-btn-guardar onclick="App.guardar()">
             ${ok?"✓ Guardar Señal":(!discrepanciaOk?"⛔ Precio bloqueado":(compras.some(c=>c.sinPrecio)?"⛔ Ticker sin precio":"✗ Saldo insuficiente"))}
           </button>
         </div>
