@@ -165,9 +165,9 @@ tr:hover td{background:#0d1117}
     <span class="app-title">Módulo 3 · Rotaciones</span>
     <a href="../" class="back-btn">← Market Suite</a>
     <div class="user-info">
-      <img id="user-avatar" class="user-avatar" src="" alt=""/>
+      <img id="user-avatar" class="user-avatar" src="" alt="" style="visibility:hidden"/>
       <span id="user-name"></span>
-      <button class="btn-logout" onclick="Auth.logout()">Salir</button>
+      <button id="btn-google-header" class="btn-logout" onclick="Auth.logout()">Salir</button>
     </div>
   </div>
 
@@ -329,22 +329,32 @@ const Auth = {
     location.reload();
   },
 
+  // Ya no exige Google al arrancar: clientes/tenencias/carteras son Supabase
+  // (ver Datos.cargarClientes/cargarCarteras/SibraBrokers). Google sigue
+  // haciendo falta SOLO para App.guardar() (escribe la rotación en Drive) —
+  // ese chequeo puntual ya existe ahí. Acá solo se restaura la sesión si ya
+  // había una (para mostrar nombre/avatar), sin bloquear nada.
   async init(){
     const saved = SibraAuth.getToken();
     if(saved){
       S.token = saved;
       const u = sessionStorage.getItem("sb_user");
-      if(u){
-        S.usuario = JSON.parse(u);
-        Auth.mostrarApp();
-        return;
-      }
-      await Auth.cargarUsuario(); // no-fatal
-      Auth.mostrarApp();
-      return;
+      if(u) S.usuario = JSON.parse(u);
+      else await Auth.cargarUsuario(); // no-fatal
     }
-    // Mostrar pantalla de login
-    $("login-screen").style.display = "flex";
+    Auth.mostrarApp();
+  },
+
+  // Header: "Salir" si hay sesión de Google, "Conectar Google" (para poder
+  // guardar) si no. No bloquea la app en ningún caso.
+  actualizarBotonHeader(){
+    const btn = $("btn-google-header");
+    if(!btn) return;
+    if(SibraAuth.getToken()){
+      btn.textContent = "Salir"; btn.onclick = Auth.logout;
+    } else {
+      btn.textContent = "Conectar Google (para guardar)"; btn.onclick = Auth.login;
+    }
   },
 
   async cargarUsuario(){
@@ -362,6 +372,8 @@ const Auth = {
     $("app").style.display = "flex";
     $("user-name").textContent = S.usuario?.name || "";
     $("user-avatar").src = S.usuario?.picture || "";
+    $("user-avatar").style.visibility = S.usuario?.picture ? "visible" : "hidden";
+    Auth.actualizarBotonHeader();
     App.inicializar();
   },
 
@@ -991,6 +1003,7 @@ const App = {
       // sesión local para que el próximo intento pida reconectar de una.
       if(/\b(401|403)\b/.test(e.message)){
         SibraAuth.logout();
+        Auth.actualizarBotonHeader();
         toast("Tu sesión de Google venció a mitad del guardado. Reconectate y REVISÁ en Drive si ya quedó algo grabado antes de reintentar (para no duplicar).","error");
       } else {
         toast("Error guardando: "+e.message,"error");
