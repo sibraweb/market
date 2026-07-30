@@ -77,9 +77,17 @@ disponible    = efectivo + caución real
 ### La caución entra por la diferencia contra lo acordado
 
 ```
-caucionTeorica = base × palanca          ← palanca es el % acordado (tabla o override manual)
-deltaCaucion   = caucionTeorica − caucionReal
+caucionReal    = caución ARS + (caución USD × MEP)   ← lo que YA está tomado
+caucionTeorica = base × palanca                      ← lo que PONEMOS con el %
+deltaCaucion   = caucionTeorica − caucionReal        ← el margen a usar
 ```
+
+**Todo lo que está en dólares se pesifica al MEP** (`S.tipoCambio`, que sale
+de AL30 / AL30D): la caución en USD, el efectivo en USD y los aportes en
+USD. Nunca se mezclan monedas sin convertir.
+
+`palanca` sale de la tabla de clientes, pero el operador puede pisarla a
+mano en el campo de arriba — ese override es el que mueve el disponible.
 
 - **deltaCaucion positivo** (se tomó menos caución de la permitida): suma
   como margen extra para comprar.
