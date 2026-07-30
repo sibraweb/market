@@ -945,7 +945,10 @@ const App = {
     const discrepanciaOk=discrepancia<=CFG.DISCREPANCIA_MAX_PCT;
     const ok=saldoOk&&discrepanciaOk;
     UI.renderInicial(ventas,totalCartera,totalAjustado,base,disp,palanca);
-    UI.renderObjetivo(compras,ventas,disp,nec,saldoOk,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion,totalCartera,discrepancia,discrepanciaOk);
+    // OJO: el 5º parámetro es `saldo` (el NÚMERO), no `saldoOk` (el booleano)
+    // -- se pasaba saldoOk y el semáforo mostraba "$1" siempre que había saldo
+    // suficiente (Math.abs(true)===1), tapando el sobrante real.
+    UI.renderObjetivo(compras,ventas,disp,nec,saldo,ok,base,totalAjustado,palanca,caucionReal,caucionTeorica,deltaCaucion,totalCartera,discrepancia,discrepanciaOk);
   },
 
   async guardar(){

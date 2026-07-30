@@ -1934,7 +1934,7 @@ async function cargarMaestros(fresh = false) {
       cc: String(c.cc), cliente: c.cliente, cuit: c.cuit, alyc: c.alyc,
       monto: Number(c.monto) || 0, perfil: c.perfil || 'AGRESIVO',
       LP: Number(c.lp) || 0, MP: Number(c.mp) || 0, CP: Number(c.cp) || 0,
-      CASH: Number(c.cash) || 0, PALANCA: Number(c.palanca) || 1,
+      CASH: Number(c.cash) || 0, PALANCA: Number(c.palanca) || 0,
       cartera: Number(c.cartera) || 0, total: Number(c.total) || 0,
       caucionPesos: 0, caucionDolares: 0,
     }));

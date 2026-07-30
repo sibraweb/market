@@ -280,7 +280,10 @@ const App = (() => {
     const base = {
       papeles: { simbolo:'', subgrupo:'', grupo:'', pais:'', moneda:'', subtipo:'', sector:'', industria:'', vto:'', moneda_cartera:'' },
       modelos: { perfil: $('selPerfil').value || 'AGRESIVO', plazo:'LARGO', ticker:'', ponderacion:0, precio_ref:null },
-      clientes: { alyc:'', cc:'', cliente:'', cuit:'', perfil:'AGRESIVO', monto:0, lp:0, mp:0, cp:0, cash:0, palanca:1, cartera:0, total:0 },
+      // OJO palanca: es un PORCENTAJE (0 = sin apalancamiento, 1 = 100%), no
+      // un multiplicador. Arrancar en 1 marcaba a todo cliente nuevo como
+      // 100% apalancado en rotaciones/príncipe.
+      clientes: { alyc:'', cc:'', cliente:'', cuit:'', perfil:'AGRESIVO', monto:0, lp:0, mp:0, cp:0, cash:0, palanca:0, cartera:0, total:0 },
     }[key];
     S[key].unshift(base); S.dirty[key] = true; render(key);
   }
@@ -421,7 +424,7 @@ const App = (() => {
         alyc, cc, cliente: String(g('cliente')).trim(), cuit: String(g('cuit')).trim(),
         perfil: String(g('perfil')).trim().toUpperCase() || 'AGRESIVO',
         monto: num(g('monto')), lp: num(g('lp')), mp: num(g('mp')), cp: num(g('cp')), cash: num(g('cash')),
-        palanca: num(g('palanca')) || 1, cartera: num(g('cartera')), total: num(g('total')),
+        palanca: num(g('palanca')), cartera: num(g('cartera')), total: num(g('total')),
       };
     });
     S.clientes = Object.values(out);
