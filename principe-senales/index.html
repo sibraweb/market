@@ -12,33 +12,29 @@
 <script src="../shared/sibra-maestros.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-/* ── Design system SIBRATECH, tema CLARO de bajo brillo ──────────────
-   Paleta oficial (rojo + escala neutra, sin otros tonos). Decisiones
-   propias de este módulo (Juan, 2026-07-30: "un poco más de contraste de
-   las letras y el fondo, algo menos blanco de fondo, más grises claros
-   para bajar el brillo"):
-     · La PÁGINA no es blanca: gris claro (#ecedec). El blanco puro a
-       pantalla completa es lo que encandila.
-     · Las TARJETAS sí son casi blancas (#fafafa) para despegarse del
-       fondo — la jerarquía la da el contraste entre superficies, no una
-       sombra.
-     · El TEXTO principal es casi negro (#141414, más oscuro que el
-       --ink-800 del DS) para ganar contraste sobre gris.
+/* ── Design system SIBRATECH, tema OSCURO ─────────────────────────────
+   Paleta oficial (rojo + escala neutra, sin otros tonos), mismo palette
+   que el resto de Market Suite (maestros/tasas/homebroker). Reemplaza el
+   tema claro original del módulo (Juan, 2026-07-30: "cambiar el fondo a
+   negro, se ve mejor, y un poco más grande las letras").
    ------------------------------------------------------------------- */
 :root{
+  /* Tema OSCURO (Juan, 2026-07-30: "cambiar el fondo a negro, se ve mejor" —
+     reemplaza el tema claro de bajo brillo del diseño original; mismo
+     palette que el resto de Market Suite: maestros/tasas/homebroker). */
   --red:#E10600;--white:#FFFFFF;--black:#0B0B0B;
-  --bg:#ecedec;        /* página: gris claro, NO blanco */
-  --bg2:#fafafa;       /* tarjetas / superficies elevadas */
-  --bg3:#e3e4e3;       /* celdas hundidas, thead, inputs */
-  --border:#d2d4d2;--border2:#b9bcb9;
-  --text:#141414;      /* casi negro: máximo contraste sobre gris */
-  --text2:#4a4f4f;     /* secundario legible (no el gris-400 lavado) */
-  --text3:#6f7474;     /* meta / captions */
-  --green:#137a3a;--green-bg:#e6f4ea;--green-border:#137a3a;
-  --red-light:#b80500;--red-bg:#fdecea;--red-border:#E10600;
-  --blue:#1257a6;
+  --bg:#0d0d0d;         /* página */
+  --bg2:#141414;        /* tarjetas / superficies elevadas */
+  --bg3:#1a1a1a;        /* celdas hundidas, thead, inputs */
+  --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.16);
+  --text:#f0f0f0;       /* principal */
+  --text2:#a6a6a6;      /* secundario */
+  --text3:#666;         /* meta / captions */
+  --green:#22c55e;--green-bg:rgba(34,197,94,.12);--green-border:#22c55e;
+  --red-light:#ff3330;--red-bg:rgba(225,6,0,.12);--red-border:#E10600;
+  --blue:#3b82f6;
 }
-body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:13px}
+body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:var(--bg2)}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
@@ -1010,6 +1006,59 @@ const Senales = {
 };
 
 // ══════════════════════════════════════════════════════
+//  PERSISTENCIA DEL DÍA — market_ordenes_dia / market_resultante_dia
+//  (Supabase, reemplaza los Sheets de Drive). Es una planilla de trabajo
+//  de HOY, no histórico: al primer guardado de un día nuevo se vacía sola
+//  (lo real ejecutado se compara al otro día contra la base de brokers, no
+//  contra esto -- ver módulo Desvíos). "Órdenes" es append (mismo criterio
+//  que tenía Drive); "Resultante" reemplaza SOLO las filas de ese cliente
+//  (mismo criterio que Drive.borrarFilasCC + append).
+// ══════════════════════════════════════════════════════
+const PersistDia = {
+  _wipeado: false,
+  async _wipeSiCambioDeDia(){
+    if(PersistDia._wipeado) return; // ya se chequeó en esta sesión de página
+    const h = hoy();
+    await Promise.all([
+      SibraMaestros.rest(`market_ordenes_dia?fecha=neq.${h}`, {method:"DELETE"}),
+      SibraMaestros.rest(`market_resultante_dia?fecha=neq.${h}`, {method:"DELETE"}),
+    ]);
+    PersistDia._wipeado = true;
+  },
+
+  // filasOrden: array de arrays, mismo orden que hRot (ver Calc.ordenes):
+  // [ID,Fecha,Solicita,Operador,Alyc,Comitente,CuentaRofex,Operación,Especie,Plazo,Cantidad,Precio,Moneda,MontoBruto,Observaciones]
+  async guardarOrdenes(filasOrden){
+    if(!filasOrden.length) return;
+    await PersistDia._wipeSiCambioDeDia();
+    const rows = filasOrden.map(f=>({
+      id:f[0], fecha:f[1], solicita:f[2], operador:f[3], alyc:f[4], comitente:String(f[5]),
+      cuenta_rofex:f[6], operacion:f[7], especie:f[8], plazo:f[9], cantidad:f[10], precio:f[11],
+      moneda:f[12], monto_bruto:f[13], observaciones:f[14],
+    }));
+    await SibraMaestros.rest("market_ordenes_dia", {method:"POST", body:rows, headers:{Prefer:"return=minimal"}});
+  },
+
+  // filasResultante: array de arrays [FECHA,ALYC,CC,TITULAR,TICKER,CANTIDAD] (ver hRes)
+  async guardarResultante(alyc, cc, filasResultante){
+    await PersistDia._wipeSiCambioDeDia();
+    await SibraMaestros.rest(
+      `market_resultante_dia?fecha=eq.${hoy()}&alyc=eq.${encodeURIComponent(alyc)}&cc=eq.${encodeURIComponent(cc)}`,
+      {method:"DELETE"});
+    if(!filasResultante.length) return;
+    const rows = filasResultante.map(f=>({fecha:f[0], alyc:f[1], cc:String(f[2]), titular:f[3], ticker:f[4], cantidad:f[5]}));
+    await SibraMaestros.rest("market_resultante_dia", {method:"POST", body:rows, headers:{Prefer:"return=minimal"}});
+  },
+
+  async leerOrdenesHoy(){
+    return SibraMaestros.rest(`market_ordenes_dia?select=*&fecha=eq.${hoy()}&order=creado_en.asc`);
+  },
+  async leerResultanteHoy(){
+    return SibraMaestros.rest(`market_resultante_dia?select=*&fecha=eq.${hoy()}&order=alyc,cc,ticker`);
+  },
+};
+
+// ══════════════════════════════════════════════════════
 //  APP
 // ══════════════════════════════════════════════════════
 const App = {
@@ -1125,14 +1174,6 @@ const App = {
       toast(`Bloqueado: la valuación con data912 difiere ${pct(tenencia.discrepanciaPct)} de la del broker (máximo ${pct(CFG.DISCREPANCIA_MAX_PCT)}). Puede haber un precio mal escalado -- revisá antes de operar.`,"error");
       return;
     }
-    // Chequeo proactivo: el login de Google acá es OAuth implícito (token de
-    // ~1h, sin refresh automático -- ver shared/sibra-auth.js). Si ya venció,
-    // frenar ANTES de escribir nada es mejor que descubrirlo a mitad de
-    // guardar (rotación grabada pero resultantes no, por ejemplo).
-    if(!SibraAuth.getToken()){
-      toast("Tu sesión de Google venció (dura ~1h). Reconectate y volvé a guardar.","error");
-      return;
-    }
     const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
     const {base,deltaCaucion}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,S.pctV,S.comV,S.gasV);
@@ -1144,37 +1185,33 @@ const App = {
     showLoad("Guardando rotación...");
     try{
       const h=hoy();
-      // 04 — Rotaciones
-      const nomRot=`${alyc}_${h}`;
       const hRot=["ID","Fecha","Solicita","Operador","Alyc","Comitente","Cuenta Rofex","Operación","Especie","Plazo","Cantidad","Precio","Moneda","Monto Bruto","Observaciones"];
-      const exRot=await Drive.buscarPorNombre(CFG.DRIVE.CARPETA_ROTACIONES,nomRot);
-      const rotId=exRot.length?exRot[0].id:await Drive.crearSheet(CFG.DRIVE.CARPETA_ROTACIONES,nomRot,hRot);
-      await Drive.appendFilas(rotId,Calc.ordenes(cl,alyc,ventas,compras));
-
-      // 05 — Resultantes
-      const hRes=["FECHA","ALYC","CC","TITULAR","TICKER","CANTIDAD"];
-      const exRes=await Drive.buscarPorNombre(CFG.DRIVE.CARPETA_RESULTANTES,h);
-      const resId=exRes.length?exRes[0].id:await Drive.crearSheet(CFG.DRIVE.CARPETA_RESULTANTES,h,hRes);
-      if(exRes.length) await Drive.borrarFilasCC(resId,cl.cc);
+      const filasOrden=Calc.ordenes(cl,alyc,ventas,compras);
       const resultante=Calc.resultante(tenencia,ventas,compras);
-      await Drive.appendFilas(resId,resultante.map(p=>[h,alyc,cl.cc,cl.cliente,p.ticker,p.cantidad]));
+      const hRes=["FECHA","ALYC","CC","TITULAR","TICKER","CANTIDAD"];
+      const filasResultante=resultante.map(p=>[h,alyc,cl.cc,cl.cliente,p.ticker,p.cantidad]);
+
+      // Planilla de trabajo del día (Supabase, no Drive) — se vacía sola en
+      // el primer guardado de un día nuevo. No es histórico: lo real
+      // ejecutado se compara al otro día contra la base de brokers (ver
+      // módulo Desvíos), esto es solo para ver "qué pedimos hoy" antes de
+      // tener las operaciones reales.
+      await PersistDia.guardarOrdenes(filasOrden);
+      await PersistDia.guardarResultante(alyc, cl.cc, filasResultante);
+
+      // Excel local para reenviar a la mesa (WhatsApp/mail) — ya no depende
+      // de Google. Dos hojas, mismo formato que usaba Drive.
+      const wb=XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hRot, ...filasOrden]), "Rotación");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hRes, ...filasResultante]), "Resultante");
+      XLSX.writeFile(wb, `Rotacion_${alyc}_${cl.cc}_${h}.xlsx`);
 
       hideLoad();
-      toast(`✓ Guardado: ${cl.cliente}`);
+      toast(`✓ Guardado y descargado: ${cl.cliente}`);
       App.siguienteCliente();
     }catch(e){
       hideLoad();
-      // 401/403 acá casi siempre es el token de Google vencido a mitad de
-      // guardado (rotación grabada, resultantes no, por ejemplo) -- avisar
-      // eso puntualmente en vez de un "Error guardando" genérico, y frenar la
-      // sesión local para que el próximo intento pida reconectar de una.
-      if(/\b(401|403)\b/.test(e.message)){
-        SibraAuth.logout();
-        Auth.actualizarBotonHeader();
-        toast("Tu sesión de Google venció a mitad del guardado. Reconectate y REVISÁ en Drive si ya quedó algo grabado antes de reintentar (para no duplicar).","error");
-      } else {
-        toast("Error guardando: "+e.message,"error");
-      }
+      toast("Error guardando: "+e.message,"error");
       console.error(e);
     }
   },
@@ -1555,20 +1592,30 @@ const UI = {
 // ══════════════════════════════════════════════════════
 const Ops = {
   subTab: 'ordenes',
-  rotacionesFiles: [], resultantesFiles: [],
-  rotacionSel: null, resultanteSel: null,
   rotacionRows: [], resultanteRows: [],
-  _selectorOrdenesHtml: '',
 
-  // Siempre relee de Drive al entrar a la pestaña -- antes quedaba cacheado
-  // la primera vez (con _inited) y si guardabas una rotación nueva después
-  // de haber abierto "Operaciones" una vez, no aparecía hasta recargar toda
-  // la página. También hay un botón "↻ Actualizar" para refrescar sin
-  // cambiar de pestaña.
+  // Lee HOY (market_ordenes_dia/market_resultante_dia, Supabase — ver
+  // PersistDia). Ya no hay selector de fecha: la tabla se vacía sola al
+  // primer guardado de cada día, así que solo puede haber "hoy". Siempre
+  // relee al entrar a la pestaña (y con el botón "↻ Actualizar") para que
+  // una rotación recién guardada aparezca sin recargar toda la página.
   async init(){
-    showLoad("Leyendo operaciones guardadas...");
+    showLoad("Leyendo operaciones de hoy...");
     try{
-      await Promise.all([this.cargarListaRotaciones(), this.cargarListaResultantes()]);
+      const [ordenes, resultante] = await Promise.all([
+        PersistDia.leerOrdenesHoy(), PersistDia.leerResultanteHoy(),
+      ]);
+      this.rotacionRows = ordenes.map(r=>({
+        ID:r.id, Fecha:r.fecha, Solicita:r.solicita, Operador:r.operador, Alyc:r.alyc,
+        Comitente:r.comitente, "Cuenta Rofex":r.cuenta_rofex, "Operación":r.operacion,
+        Especie:r.especie, Plazo:r.plazo, Cantidad:r.cantidad, Precio:r.precio,
+        Moneda:r.moneda, "Monto Bruto":r.monto_bruto, Observaciones:r.observaciones,
+      }));
+      this.resultanteRows = resultante.map(r=>({
+        FECHA:r.fecha, ALYC:r.alyc, CC:r.cc, TITULAR:r.titular, TICKER:r.ticker, CANTIDAD:r.cantidad,
+      }));
+      this.renderTablaOrdenes();
+      this.renderTablaCartera();
     }catch(e){ toast("Error cargando operaciones: "+e.message, "error"); console.error(e); }
     hideLoad();
   },
@@ -1581,70 +1628,24 @@ const Ops = {
     $("ops-cartera").style.display = t === "cartera" ? "block" : "none";
   },
 
-  // ── Órdenes cargadas: un Sheet por "{ALYC}_{fecha}" en CARPETA_ROTACIONES ──
-  async cargarListaRotaciones(){
-    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_ROTACIONES);
-    this.rotacionesFiles = archivos.map(f => {
-      const m = f.name.match(/^(.+)_(\d{4}-\d{2}-\d{2})$/);
-      return { id: f.id, name: f.name, alyc: m ? m[1] : f.name, fecha: m ? m[2] : '' };
-    }).sort((a, b) => b.fecha.localeCompare(a.fecha) || a.alyc.localeCompare(b.alyc));
-    if(this.rotacionesFiles.length) await this.verRotacion(this.rotacionesFiles[0].id);
-    else $("ops-ordenes").innerHTML = '<p class="hint">No hay rotaciones guardadas todavía.</p>';
-  },
-
-  async verRotacion(fileId){
-    this.rotacionSel = fileId;
-    const values = await Drive.leerValores(fileId, 'A1:O2000');
-    const headers = values[0] || [];
-    this.rotacionRows = values.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ''])));
-    this.renderTablaOrdenes();
-  },
-
   renderTablaOrdenes(){
-    const opts = this.rotacionesFiles.map(f =>
-      `<option value="${f.id}" ${f.id === this.rotacionSel ? 'selected' : ''}>${f.fecha} · ${f.alyc}</option>`).join('');
-    const selector = this.rotacionesFiles.length
-      ? `<div style="margin-bottom:12px"><select class="input-field" style="max-width:260px" onchange="Ops.verRotacion(this.value)">${opts}</select></div>` : '';
     const head = ["ID","Fecha","Solicita","Operador","Alyc","Comitente","Cuenta Rofex","Operación","Especie","Plazo","Cantidad","Precio","Moneda","Monto Bruto","Observaciones"];
     const rows = this.rotacionRows;
-    const tabla = rows.length
+    $("ops-ordenes").innerHTML = rows.length
       ? `<div style="overflow-x:auto"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
           ${rows.map(r => `<tr>${head.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('')}
         </tbody></table></div>`
-      : '<p class="hint">Sin filas en esta rotación.</p>';
-    $("ops-ordenes").innerHTML = selector + tabla;
-  },
-
-  // ── Cartera operada: un Sheet por fecha (todas las ALyC juntas) en CARPETA_RESULTANTES ──
-  async cargarListaResultantes(){
-    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_RESULTANTES);
-    this.resultantesFiles = archivos.filter(f => /^\d{4}-\d{2}-\d{2}$/.test(f.name))
-      .sort((a, b) => b.name.localeCompare(a.name));
-    if(this.resultantesFiles.length) await this.verResultante(this.resultantesFiles[0].id);
-    else $("ops-cartera").innerHTML = '<p class="hint">No hay carteras operadas guardadas todavía.</p>';
-  },
-
-  async verResultante(fileId){
-    this.resultanteSel = fileId;
-    const values = await Drive.leerValores(fileId, 'A1:F5000');
-    const headers = values[0] || [];
-    this.resultanteRows = values.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ''])));
-    this.renderTablaCartera();
+      : '<p class="hint">Todavía no se guardó ninguna rotación hoy.</p>';
   },
 
   renderTablaCartera(){
-    const opts = this.resultantesFiles.map(f =>
-      `<option value="${f.id}" ${f.id === this.resultanteSel ? 'selected' : ''}>${f.name}</option>`).join('');
-    const selector = this.resultantesFiles.length
-      ? `<div style="margin-bottom:12px"><select class="input-field" style="max-width:180px" onchange="Ops.verResultante(this.value)">${opts}</select></div>` : '';
     const head = ["FECHA","ALYC","CC","TITULAR","TICKER","CANTIDAD"];
     const rows = this.resultanteRows;
-    const tabla = rows.length
+    $("ops-cartera").innerHTML = rows.length
       ? `<div style="overflow-x:auto"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
           ${rows.map(r => `<tr>${head.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('')}
         </tbody></table></div>`
-      : '<p class="hint">Sin filas en esta cartera.</p>';
-    $("ops-cartera").innerHTML = selector + tabla;
+      : '<p class="hint">Todavía no se guardó ninguna cartera operada hoy.</p>';
   },
 
   // ── Enviar a ALyC: arma un Excel con las filas de esa ALyC (de la sub-pestaña
@@ -1653,7 +1654,9 @@ const Ops = {
   //    memoria project_whatsapp_sender/project_sibra_brokers: esta página está
   //    en https, el servicio de WhatsApp corre en http local, y el navegador
   //    bloquea ese llamado directo por mixed content). Por ahora: se descarga
-  //    el .xlsx listo para adjuntar a mano en el grupo de esa ALyC. ──
+  //    el .xlsx listo para adjuntar a mano en el grupo de esa ALyC — el dato
+  //    en sí ya quedó guardado en Supabase al guardar cada rotación, no hace
+  //    falta subir una copia a ningún lado más. ──
   abrirEnviarAlyc(){
     const campoAlyc = Ops.subTab === 'ordenes' ? 'Alyc' : 'ALYC';
     const fuente = Ops.subTab === 'ordenes' ? Ops.rotacionRows : Ops.resultanteRows;
@@ -1678,23 +1681,10 @@ const Ops = {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, alyc.slice(0, 31));
     const nombreArchivo = `${alyc}_${hoy()}_${Ops.subTab}.xlsx`;
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 
     Ops.cerrarEnviarAlyc();
-    XLSX.writeFile(wb, nombreArchivo); // descarga local, como antes
-
-    // Además, sube una copia a la misma carpeta de Drive de donde salió el
-    // dato -- 04_ROTACIONES_GENERADAS si es "ordenes", 05_CARTERAS_RESULTANTES
-    // si es "cartera" -- para que quede un registro de lo que se mandó a mesa.
-    try{
-      const folderId = Ops.subTab === 'ordenes' ? CFG.DRIVE.CARPETA_ROTACIONES : CFG.DRIVE.CARPETA_RESULTANTES;
-      await Drive.subirArchivo(folderId, nombreArchivo, buf,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      toast(`✓ ${nombreArchivo} descargado y guardado en Drive — adjuntalo a mano en el grupo de ${alyc}`);
-    }catch(e){
-      toast(`✓ ${nombreArchivo} descargado, pero no se pudo subir a Drive: ${e.message}`, 'error');
-      console.error('[Ops] subirArchivo:', e);
-    }
+    XLSX.writeFile(wb, nombreArchivo);
+    toast(`✓ ${nombreArchivo} descargado — adjuntalo a mano en el grupo de ${alyc}`);
   },
 };
 
