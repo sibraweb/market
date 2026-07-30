@@ -999,7 +999,11 @@ const Senales = {
       S.senales.venta = b.venta.filter(s=>s.ticker);
       S.senales.compra = b.compra.filter(s=>s.ticker);
       Senales.borrador = null;
-      toast("Señales guardadas — "+rows.length+" filas");
+      // Si ya había un cliente cargado, reaplicar Y re-renderizar ahora --
+      // si no, las tablas de Cartera Inicial/Objetivo quedan con las
+      // señales VIEJAS hasta volver a elegir el cliente.
+      if(S.tenencia){ Senales.aplicar(S.tenencia); App.render(); }
+      toast("Señales guardadas — "+rows.length+" filas"+(S.tenencia?" (reaplicadas al cliente actual)":""));
       UI.renderSenales();
     }catch(e){ toast("Error al guardar señales: "+e.message, "error"); }
   },
@@ -1463,7 +1467,23 @@ const UI = {
             }).join("")}
           </tbody></table>
         </div>
-        <div style="display:flex;justify-content:flex-end">
+        ${(()=>{
+          // Señales de venta que NO aplican a este cliente (no tiene el
+          // ticker) -- no duplican la tabla de arriba (que ya muestra las
+          // que sí tiene), solo dan visibilidad de que existen.
+          const tickersConTenencia = new Set(ventas.map(v=>v.ticker));
+          const sinTenencia = S.senales.venta.filter(s=>!tickersConTenencia.has(s.ticker));
+          if(!sinTenencia.length) return "";
+          return `<div class="section-title" style="margin-top:14px">Otras señales de venta (sin tenencia)</div>
+          <p style="font-size:11px;color:var(--text3);margin:-4px 0 10px">
+            El cliente no tiene estos tickers -- no aparecen en "Qué vender" porque no hay nada que vender.
+          </p>
+          <div class="tbl-wrap">
+            <table><thead><tr><th>Ticker</th><th>% señal</th></tr></thead>
+            <tbody>${sinTenencia.map(s=>`<tr><td><b>${s.ticker}</b></td><td>${pct(s.valor)}</td></tr>`).join("")}</tbody></table>
+          </div>`;
+        })()}
+        <div style="display:flex;justify-content:flex-end;margin-top:12px">
           <button class="btn btn-red" onclick="UI.setTab('objetivo')">Cartera Objetivo →</button>
         </div>
       </div>
