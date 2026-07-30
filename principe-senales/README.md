@@ -52,30 +52,17 @@ Sin Google. Cada guardado:
 la base de brokers (desvíos: "pedimos 10, operaron 11"). Esto es solo "qué
 pedimos hoy" antes de tener las operaciones reales.
 
-## Apalancamiento — LEER ANTES DE TOCAR
+## Motor de cálculo (base, caución, disponible)
 
-`palanca` (de `market_clientes`) es un **PORCENTAJE**, no un multiplicador:
-`caucionTeorica = base × palanca`, así que `1` significa **100% apalancado**
-y `0` significa sin apalancamiento acordado. En `../actual/` el mismo campo
-se cargaba con `|| 1` porque ahí era un multiplicador neutro — copiar ese
-default acá (o a la migración de clientes) marca a todos los clientes como
-100% apalancados e infla el disponible para comprar con una caución teórica
-que no existe. **Pasó el 2026-07-30, corregido; nunca defaultear a 1.**
+Es **el mismo de `../rotaciones/`** y está documentado allá para no tenerlo
+en dos lados: [`../rotaciones/README.md`](../rotaciones/README.md) →
+"Cómo se calcula el disponible (y qué hace la caución)".
 
-La lógica de sizing en sí ya se estabilizó antes en cuatro pasos (ver
-`git log`: `82ac883` → `a7f8361` → `24ce66b` → `a131bd5`), y el diseño
-final es:
-
-- La base de la rotación es **títulos + cash tal cual están** — no se suma
-  la caución real ni se multiplica por (1+palanca). Si la caución está
-  invertida ya quedó reflejada ahí; si el cliente la retiró, no está.
-- `deltaCaucion = caucionTeorica − caucionReal` **sí** suma/resta del
-  disponible, pero **nada lo mueve solo**: el operador sube o baja el % de
-  apalancamiento a mano. Si acepta a conciencia el nivel real, sube el %
-  hasta que el semáforo quede EN REGLA — así queda marcado que se revisó,
-  en vez de quedar en rojo por descuido.
-- Nunca bloquea Guardar. Lo único que bloquea es el saldo insuficiente, un
-  ticker sin precio, o la discrepancia de valuación contra el broker.
+Lo imprescindible: **`palanca` es un PORCENTAJE** (`0` = sin
+apalancamiento, `1` = 100%), la base **no** se apalanca, y `deltaCaucion`
+suma/resta del disponible pero solo cuando el operador mueve el % a mano.
+**Nunca defaultear palanca a 1** — pasó el 2026-07-30 y marcó a los 30
+clientes como 100% apalancados.
 
 ## Precios
 
