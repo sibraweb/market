@@ -953,7 +953,8 @@ const Senales = {
       S.senales.venta  = rows.filter(r=>r.tipo==="VENTA")
         .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0}));
       S.senales.compra = rows.filter(r=>r.tipo==="COMPRA")
-        .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0}));
+        .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0,
+                   pctEfvo:(r.pct_efvo===null||r.pct_efvo===undefined)?undefined:Number(r.pct_efvo)}));
     }catch(e){
       console.warn("[Señales] no se pudieron cargar:", e.message);
     }
@@ -965,6 +966,12 @@ const Senales = {
   // Compra: % TOPE de la cartera (títulos+cash, misma base que el resto del
   // módulo) — se sugiere la cantidad que falta para LLEGAR a ese tope, neta
   // de lo que la propia señal de venta ya esté liquidando de ese ticker.
+  // Además, opcionalmente, un % MÁXIMO del disponible (ventas + efectivo de
+  // cuenta + caución teórica -- mismo Calc.disponible que el resto del
+  // módulo) a destinar a ESTE ticker: si el tope de cartera pediría gastar
+  // más que eso, gana el más restrictivo. Sin este campo cargado (pctEfvo
+  // undefined) no hay tope de efectivo, solo el de cartera (comportamiento
+  // de antes).
   // Sin precio en data912 no se puede sugerir cantidad: se omite (el
   // operador la carga a mano si hace falta, igual que cualquier ticker
   // manual) en vez de dejar una fila con cantidad 0 silenciosa.
@@ -976,7 +983,9 @@ const Senales = {
     const postVenta = {};
     ventasPreview.forEach(v=>{ postVenta[v.ticker]=v.cantActual-v.cantOp; });
 
-    const { base } = Calc.base(ten, S.aporteARS, S.aporteUSD, S.clienteActual?.palanca||0);
+    const { base, deltaCaucion } = Calc.base(ten, S.aporteARS, S.aporteUSD, S.clienteActual?.palanca||0);
+    const disponible = Calc.disponible(ventasPreview, ten, S.aporteARS, S.aporteUSD, deltaCaucion);
+    const factorComC = 1+S.comC+S.gasC;
 
     S.manual = S.senales.compra.map(s=>{
       const pu = Precios.get(s.ticker)||0;
@@ -985,7 +994,12 @@ const Senales = {
       const cantidadPost = postVenta[s.ticker]!==undefined ? postVenta[s.ticker] : (pos?pos.cantidad:0);
       const valorActual = cantidadPost*pu;
       const valorTope = base*s.valor;
-      const faltante = Math.max(0, valorTope-valorActual);
+      let faltante = Math.max(0, valorTope-valorActual);
+      if(s.pctEfvo!=null && disponible>0){
+        const maxGasto = s.pctEfvo*disponible;          // incluye comisión
+        const maxFaltante = Math.max(0, maxGasto/factorComC); // equivalente sin comisión
+        faltante = Math.min(faltante, maxFaltante);
+      }
       const cantidad = fl(faltante/pu);
       return cantidad>0 ? {ticker:s.ticker, cantidad} : null;
     }).filter(Boolean);
@@ -1016,17 +1030,22 @@ const Senales = {
   },
 
   renderTabla(tipo){
+    const esCompra = tipo==="compra";
     const lista = (Senales.borrador||S.senales)[tipo];
     const rows = lista.map((s,i)=>`<tr>
       <td>${Senales.selectTicker(tipo,i,s.ticker)}</td>
       <td style="width:110px"><input class="input-field pct-input" type="number" min="0" step="1"
             value="${Math.round(s.valor*100)}"
             onchange="Senales.setCampo('${tipo}',${i},'valor',Math.max(0,Number(this.value)/100))"/></td>
+      ${esCompra?`<td style="width:110px"><input class="input-field pct-input" type="number" min="0" step="1"
+            placeholder="sin tope" value="${s.pctEfvo!=null?Math.round(s.pctEfvo*100):""}"
+            onchange="Senales.setCampo('compra',${i},'pctEfvo',this.value===''?undefined:Math.max(0,Number(this.value)/100))"/></td>`:""}
       <td style="width:40px"><button class="btn btn-ghost" style="padding:4px 8px" onclick="Senales.borrarFila('${tipo}',${i})">✕</button></td>
     </tr>`).join("");
+    const ncols = esCompra?4:3;
     return `<div class="tbl-wrap" style="margin-bottom:10px">
-      <table><thead><tr><th style="text-align:left">Ticker</th><th>${tipo==="venta"?"% a vender":"% tope de cartera"}</th><th></th></tr></thead>
-      <tbody>${rows||`<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:16px">Sin señales de ${tipo}</td></tr>`}</tbody></table>
+      <table><thead><tr><th style="text-align:left">Ticker</th><th>${tipo==="venta"?"% a vender":"% tope de cartera"}</th>${esCompra?`<th title="Tope opcional: no gastar en este ticker más que este % del disponible (ventas + efectivo de cuenta + caución teórica), aunque el % tope de cartera de al lado pida más. Vacío = sin tope de efectivo.">% máx. efectivo</th>`:""}<th></th></tr></thead>
+      <tbody>${rows||`<tr><td colspan="${ncols}" style="text-align:center;color:var(--text3);padding:16px">Sin señales de ${tipo}</td></tr>`}</tbody></table>
     </div>
     <button class="btn btn-ghost" onclick="Senales.agregarFila('${tipo}')">+ Agregar ${tipo==="venta"?"venta":"compra"}</button>`;
   },
@@ -1038,7 +1057,7 @@ const Senales = {
   },
   agregarFila(tipo){
     if(!Senales.borrador) Senales.borrador=JSON.parse(JSON.stringify(S.senales));
-    Senales.borrador[tipo].push({ticker:"", valor:tipo==="venta"?0:0});
+    Senales.borrador[tipo].push({ticker:"", valor:tipo==="venta"?0:0, pctEfvo:undefined});
     UI.renderSenales();
   },
   borrarFila(tipo,i){
@@ -1050,8 +1069,9 @@ const Senales = {
     const b = Senales.borrador||S.senales;
     const totalFilas = b.venta.length + b.compra.length;
     const rows = [
-      ...b.venta.filter(s=>s.ticker).map(s=>({tipo:"VENTA", ticker:s.ticker, valor:s.valor})),
-      ...b.compra.filter(s=>s.ticker).map(s=>({tipo:"COMPRA", ticker:s.ticker, valor:s.valor})),
+      ...b.venta.filter(s=>s.ticker).map(s=>({tipo:"VENTA", ticker:s.ticker, valor:s.valor, pct_efvo:null})),
+      ...b.compra.filter(s=>s.ticker).map(s=>({tipo:"COMPRA", ticker:s.ticker, valor:s.valor,
+          pct_efvo:(s.pctEfvo===undefined||s.pctEfvo===null)?null:Number(s.pctEfvo)})),
     ];
     // Si hay filas cargadas pero ninguna tiene ticker (quedó vacío o sin
     // tipear), avisar CLARO antes de guardar 0 -- si no, "guardar" borra
