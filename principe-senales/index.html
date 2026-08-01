@@ -294,6 +294,10 @@ const CFG = {
 const S = {
   token: null, usuario: null,
   clientes: [], carteras: {}, propuestas: {}, precios: {}, tipoCambio: null,
+  // Tickers válidos según la clasificación de activos (market_papeles,
+  // maestro en Supabase) -- se usa para poblar los <select> de ticker en
+  // señales y evitar tipeos que no coticen ni tengan clasificación.
+  papeles: [],
   // Principe Senales: la cartera objetivo NO sale de un modelo — se tipea.
   // Cada item: {ticker, cantidad}. El precio se resuelve con Precios.get().
   manual: [],
@@ -614,6 +618,17 @@ const Datos = {
       console.log(`[Carteras] ${p}: ${S.carteras[p].length} tickers (Supabase)`);
     }
     return S.carteras;
+  },
+
+  // ── Papeles (clasificación de activos) ────────────────
+  //    Maestro en Supabase (market_papeles, se edita en ../maestros/).
+  //    Se usa solo para poblar el desplegable de tickers en Señales.
+  async cargarPapeles(){
+    const rows = await SibraMaestros.papeles();
+    S.papeles = rows.map(r => String(r.simbolo).trim().toUpperCase())
+      .filter(Boolean).sort();
+    console.log("[Papeles]",S.papeles.length,"tickers cargados (Supabase)");
+    return S.papeles;
   },
 
   // ── Propuestas (cartera objetivo por comitente) ───────
@@ -983,11 +998,27 @@ const Senales = {
   //    cliente (Senales.aplicar corre en selCliente, no acá).
   borrador: null, // {venta:[...], compra:[...]} mientras se edita; null = usar S.senales
 
+  // Desplegable de tickers, filtrado a los que existen en la clasificación
+  // (market_papeles) -- así no se tipea de más y se evitan errores de
+  // tipeo. Si el ticker ya guardado no está en la clasificación (papel
+  // dado de baja, o la clasificación no cargó), se agrega igual como
+  // opción extra para no perder el dato existente.
+  selectTicker(tipo, i, actual){
+    const papeles = S.papeles||[];
+    const faltaActual = actual && !papeles.includes(actual);
+    const opciones = [
+      `<option value="">-- elegir --</option>`,
+      faltaActual?`<option value="${actual}" selected>${actual} (no está en clasificación)</option>`:"",
+      ...papeles.map(t=>`<option value="${t}" ${t===actual?"selected":""}>${t}</option>`),
+    ].join("");
+    return `<select class="input-field" style="text-transform:uppercase"
+              onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)">${opciones}</select>`;
+  },
+
   renderTabla(tipo){
     const lista = (Senales.borrador||S.senales)[tipo];
     const rows = lista.map((s,i)=>`<tr>
-      <td><input class="input-field" style="text-transform:uppercase" value="${s.ticker}"
-            onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)"/></td>
+      <td>${Senales.selectTicker(tipo,i,s.ticker)}</td>
       <td style="width:110px"><input class="input-field pct-input" type="number" min="0" step="1"
             value="${Math.round(s.valor*100)}"
             onchange="Senales.setCampo('${tipo}',${i},'valor',Math.max(0,Number(this.value)/100))"/></td>
@@ -1111,6 +1142,7 @@ const App = {
     catch(e){ hideLoad(); errBox("Error cargando clientes",e.message); return; }
 
     await Senales.cargar(); // no-fatal, ver Senales.cargar
+    await Datos.cargarPapeles().catch(e=>console.warn("[Papeles] no se pudieron cargar:", e.message)); // no-fatal
 
     showLoad("Cargando precios live...");
     await Precios.cargarTodos(); // no-fatal
@@ -1210,6 +1242,21 @@ const App = {
   setCantManual(idx,v){
     if(!S.manual[idx]) return;
     S.manual[idx].cantidad=Math.max(0,Math.floor(Number(v)||0));
+    App.render();
+  },
+  // % del DISPONIBLE (ventas + efectivo de cuenta + caución teórica --
+  // ver Calc.disponible) que se quiere destinar a esta compra. Fija la
+  // cantidad final directamente (cantBase=cantOp, % Comprar vuelve a
+  // 100%) para que no quede una doble edición confusa entre esta columna
+  // y "% Comprar". Sin precio o sin disponible no hay nada que calcular.
+  setCantPctDisp(idx,pu,disp,pctInput){
+    if(!S.manual[idx]) return;
+    const t=S.manual[idx].ticker;
+    const pctVal=Math.max(0,Number(pctInput)||0)/100;
+    const factor=1+S.comC+S.gasC;
+    const cantidad=(pu>0&&disp>0)?Math.floor((pctVal*disp)/(pu*factor)):0;
+    S.manual[idx].cantidad=Math.max(0,cantidad);
+    S.pctC[t]=1;
     App.render();
   },
   quitarTicker(idx){ S.manual.splice(idx,1); App.render(); },
@@ -1690,8 +1737,8 @@ const UI = {
           ⚠ No alcanza: vendé más en "Cartera Inicial", bajá cantidades, o subí el %
           de apalancamiento para reconocer más caución.</div>`:""}
         <div class="tbl-wrap" style="margin-bottom:12px">
-          <table><thead><tr><th>Ticker</th><th title="Cantidad de la señal o tipeada a mano">Pedido</th><th title="% sobre lo pedido. Se puede pasar de 100% para comprar más">% Comprar</th><th>Compra</th><th>PU</th><th>Monto</th><th>Com.</th><th>Total</th><th>Queda con</th><th title="% que queda DESPUÉS de comprar">% Neto post</th><th title="% que queda DESPUÉS de comprar, sobre cartera con caución">% Bruto post</th></tr></thead>
-          <tbody>${compras.length===0?`<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:20px">Cargá especies en el panel de la izquierda</td></tr>`:
+          <table><thead><tr><th>Ticker</th><th title="Cantidad de la señal o tipeada a mano">Pedido</th><th title="% sobre lo pedido. Se puede pasar de 100% para comprar más">% Comprar</th><th title="% del disponible (ventas + efectivo de cuenta + caución teórica) que se destina a esta compra. Editable: fija la cantidad final. La suma de esta columna no debería superar el 100% -- salvo que a propósito se quiera dejar parte del disponible en efectivo líquido.">% Efvo.</th><th>Compra</th><th>PU</th><th>Monto</th><th>Com.</th><th>Total</th><th>Queda con</th><th title="% que queda DESPUÉS de comprar">% Neto post</th><th title="% que queda DESPUÉS de comprar, sobre cartera con caución">% Bruto post</th></tr></thead>
+          <tbody>${compras.length===0?`<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:20px">Cargá especies en el panel de la izquierda</td></tr>`:
             compras.map(c=>{
               // % RESULTANTE de la compra: cantidad final (lo que queda tras
               // vender + lo que se compra) sobre la cartera. Mismo criterio
@@ -1705,6 +1752,9 @@ const UI = {
               <td><b>${c.ticker}</b></td>
               <td>${fmtN(c.cantBase)}</td>
               <td>${UI.pctCtrl("c",c.ticker,c.pEj)}</td>
+              <td>${c.pu>0?`<input class="input-field pct-input" type="number" min="0" step="1" style="width:70px"
+                    value="${disp>0?Math.round((c.total/disp)*100):0}"
+                    onchange="App.setCantPctDisp(${c.idx},${c.pu},${disp},Number(this.value))"/>`:"—"}</td>
               <td style="color:var(--green);font-weight:700">${c.cantOp?fmtN(c.cantOp):"—"}</td>
               <td>${c.sinPrecio?'<span style="color:var(--red)">sin cotización</span>':fmt(c.pu)}</td>
               <td>${c.monto?fmt(c.monto):"—"}</td>
@@ -1714,7 +1764,17 @@ const UI = {
               <td style="font-weight:700">${pct(pctNeto)}</td>
               <td style="color:var(--text2)">${pct(pctBruto)}</td></tr>`;
             }).join("")}
-          </tbody></table>
+          </tbody>
+          ${compras.length>0?(()=>{
+            const totalPctEfvo=disp>0?cF.reduce((s,c)=>s+c.total,0)/disp:0;
+            const excede=totalPctEfvo>1;
+            return `<tfoot><tr style="border-top:1px solid var(--border2)">
+              <td colspan="3" style="text-align:right;font-size:10px;color:var(--text3)">Total % Efvo. usado</td>
+              <td style="font-weight:700;color:${excede?"var(--red-light)":"var(--text2)"}">${pct(totalPctEfvo)}${excede?" ⚠":""}</td>
+              <td colspan="8"></td>
+            </tr></tfoot>`;
+          })():""}
+          </table>
         </div>
         <div style="display:flex;gap:10px;justify-content:flex-end">
           <button class="btn btn-ghost" onclick="App.pasarSinOperar()">Pasar sin operar →</button>
