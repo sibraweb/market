@@ -146,11 +146,112 @@ const SibraBrokers = (() => {
     return values.slice(1).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] ?? ''])));
   }
 
+  // ───────────────────────────────────────────────────────────────
+  //  Foto del FIFO: posiciones abiertas calculadas por NOSOTROS
+  // ───────────────────────────────────────────────────────────────
+  // La tenencia del broker trae `average_cost` (el PPC del ALyC) y su propia
+  // rentabilidad. Nuestro FIFO calcula el PPC PROPIO sobre la historia real de
+  // compras/ventas (una sola cola por título, ARS y USD unificados al MEP del
+  // día de CADA operación, splits aplicados), y agrega lo que el broker no
+  // tiene: antigüedad promedio ponderada, rentas cobradas mientras la posición
+  // estuvo abierta, TNA y TIR — brutas y netas de comisiones.
+  //
+  // Vive en `brokers_posiciones_abiertas` (la escribe fifo.rebuild() de
+  // sibra-brokers, una fila por broker × cuenta × ticker). Si la tabla todavía
+  // no existe o Supabase no está, esto devuelve vacío y las tenencias quedan
+  // exactamente como estaban — ningún módulo se rompe por esto.
+  const POSICIONES_TABLE = 'brokers_posiciones_abiertas';
+
+  // num() devuelve 0 para lo que no parsea; acá hace falta distinguir "sin
+  // dato" de "cero" (una TNA vacía porque no hubo spot NO es una TNA de 0%).
+  function numN(v) {
+    if (v === '' || v === null || v === undefined) return null;
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function posKey(alyc, cuenta, ticker) {
+    return `${String(alyc || '').trim().toUpperCase()}|${String(cuenta || '').trim()}|${String(ticker || '').trim().toUpperCase()}`;
+  }
+
+  function normalizePosicion(r) {
+    return {
+      alyc: r.broker_code, comitente: r.account, cliente: r.client_name,
+      ticker: r.ticker, moneda: r.currency,
+      cantidad: num(r.quantity),
+      // Costo propio (FIFO), NO el del broker.
+      ppcPropio: numN(r.ppc), costoTotal: numN(r.costo_total),
+      ppcPropioUsd: numN(r.ppc_usd), costoTotalUsd: numN(r.costo_total_usd),
+      rentasCobradas: numN(r.rentas_cobradas),
+      // Antigüedad: promedio PONDERADO por cantidad entre lotes, no la del primero.
+      fechaPrimeraCompra: r.fecha_primera_compra || null,
+      diasTenencia: numN(r.dias_tenencia), nLotes: numN(r.n_lotes),
+      // Marcado a mercado con el spot del momento del cálculo.
+      precioSpot: numN(r.precio_spot), valorMercado: numN(r.valor_mercado),
+      resultado: numN(r.resultado_no_realizado), resultadoPct: numN(r.resultado_no_realizado_pct),
+      tnaPct: numN(r.tna_pct),
+      // "Total" = precio + rentas cobradas por los lotes abiertos.
+      resultadoTotal: numN(r.resultado_total_no_realizado), resultadoTotalPct: numN(r.resultado_total_pct),
+      tnaTotalPct: numN(r.tna_total_pct),
+      tirPlazoPct: numN(r.tir_plazo_pct), tirAnualPct: numN(r.tir_anual_pct),
+      resultadoUsd: numN(r.resultado_no_realizado_usd), resultadoPctUsd: numN(r.resultado_no_realizado_pct_usd),
+      // Netas de comisión (entrada + salida) a la tasa observada de la cuenta.
+      // Vacías si esa cuenta no tiene comisiones registradas: no se estima
+      // con tarifario. `tasaCostoPct` viaja al lado para poder rehacer el
+      // número a mano.
+      tasaCostoPct: numN(r.tasa_costo_pct), ppcNeto: numN(r.ppc_neto),
+      valorMercadoNeto: numN(r.valor_mercado_neto), resultadoNeto: numN(r.resultado_neto),
+      resultadoNetoPct: numN(r.resultado_neto_pct), tnaNetaPct: numN(r.tna_neta_pct),
+      tirNetaPct: numN(r.tir_neta_anual_pct),
+      calculadoAt: r.snapshot_at || r.updated_at || null,
+    };
+  }
+
+  // { rows, byKey, snapshotAt, disponible }. `snapshotAt` es CUÁNDO se calculó
+  // la foto: el FIFO corre por ciclo de historial (~1/hora) mientras que las
+  // tenencias se refrescan cada 5 min, así que puede haber diferencia — hay que
+  // mostrarla, no esconderla (una posición vendida hace 20 min sigue acá).
+  async function loadPosiciones(opts = {}) {
+    const vacio = { rows: [], byKey: {}, snapshotAt: null, disponible: false };
+    if (typeof SibraMaestros === 'undefined') return vacio;
+    const cacheKey = 'brokers_sb_posiciones';
+    if (!opts.fresh) {
+      const cached = SibraCache.get(cacheKey, TTL);
+      if (cached) return cached;
+    } else SibraCache.invalidate(cacheKey);
+    let raw;
+    try {
+      raw = await SibraMaestros.selectAll(POSICIONES_TABLE);
+    } catch (e) {
+      // Tabla inexistente todavía (el FIFO nunca publicó) o sin sesión: no es
+      // un error del módulo, es dato que aún no está.
+      console.warn('[SibraBrokers] posiciones FIFO no disponibles:', e.message);
+      return vacio;
+    }
+    const rows = (raw || []).map(normalizePosicion);
+    const byKey = {};
+    rows.forEach(p => { byKey[posKey(p.alyc, p.comitente, p.ticker)] = p; });
+    const out = { rows, byKey, disponible: rows.length > 0,
+                  snapshotAt: rows.length ? rows[0].calculadoAt : null };
+    SibraCache.set(cacheKey, out);
+    return out;
+  }
+
   // Posiciones normalizadas desde brokers_tenencias/TENENCIAS.CURRENT (BCCH/IEB/ADCAP, efectivo incluido).
+  // Cada fila viene ENRIQUECIDA con la foto del FIFO cuando existe (`fifo`):
+  // ahí están el PPC propio, la antigüedad y la TIR/TNA. `ppc` sigue siendo el
+  // del broker — no se pisa nada, se agrega al lado (mismo criterio que las
+  // columnas netas del FIFO).
   async function loadTenencias(opts = {}) {
-    const rows = await snapshotRows('brokers_tenencias', TENENCIAS_SHEET_ID, opts);
+    const [rows, pos] = await Promise.all([
+      snapshotRows('brokers_tenencias', TENENCIAS_SHEET_ID, opts),
+      loadPosiciones(opts),
+    ]);
     return rows.map(r => {
       const cash = normalizeCash(r.ticker);
+      // El match va contra el ticker CRUDO: el canónico de efectivo no tiene
+      // FIFO (el efectivo no es una posición con costo propio).
+      const fifo = cash ? null : (pos.byKey[posKey(r.broker_code, r.account, r.ticker)] || null);
       return {
         alyc: r.broker_code,
         comitente: r.account,
@@ -167,6 +268,12 @@ const SibraBrokers = (() => {
         precio: num(r.last_price),
         valor: num(r.market_value_ars),
         rentabilidadPct: r.unrealized_pnl_pct === '' ? null : num(r.unrealized_pnl_pct),
+        // Nuestro cálculo (null si el FIFO todavía no cubre este título).
+        fifo,
+        ppcPropio: fifo ? fifo.ppcPropio : null,
+        diasTenencia: fifo ? fifo.diasTenencia : null,
+        tirAnualPct: fifo ? fifo.tirAnualPct : null,
+        tnaPct: fifo ? fifo.tnaPct : null,
       };
     });
   }
@@ -198,5 +305,5 @@ const SibraBrokers = (() => {
   }
 
   return { TENENCIAS_SHEET_ID, CAUCIONES_SHEET_ID, sheetValues, rowsFromValues, snapshotRows, loadTenencias, loadCauciones, cashBucket,
-           clasificar, precioUnitario, TIPO_INFO };
+           loadPosiciones, posKey, clasificar, precioUnitario, TIPO_INFO };
 })();

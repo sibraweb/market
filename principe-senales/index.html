@@ -12,6 +12,7 @@
 <script src="../shared/sibra-maestros.js"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
+<script src="../shared/sibra-guardar-archivo.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 /* ── Design system SIBRATECH, tema OSCURO ─────────────────────────────
@@ -249,6 +250,18 @@ tr:hover td{background:#0d1117}
     <p class="hint">Se arma un Excel con las filas de "<span id="envFuenteLabel">Órdenes cargadas</span>" de la ALyC elegida y se abre WhatsApp para adjuntarlo al grupo de mesa.</p>
     <label class="label">ALyC</label>
     <select id="envAlycSel" class="input-field"></select>
+    <div id="envPrecioWrap" style="margin-top:14px">
+      <label class="label">Columna Precio</label>
+      <label style="display:flex;gap:8px;align-items:center;margin:6px 0;cursor:pointer">
+        <input type="radio" name="envPrecio" value="limite" checked>
+        <span>Mantener el precio límite calculado</span>
+      </label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+        <input type="radio" name="envPrecio" value="mercado">
+        <span>Todo a precio de mercado</span>
+      </label>
+      <p class="hint" style="margin-top:6px">A mercado, la columna Precio va con la palabra <b>MERCADO</b> en cada fila (el monto bruto queda como referencia del cálculo).</p>
+    </div>
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="Ops.cerrarEnviarAlyc()">Cancelar</button>
       <button class="btn btn-red" onclick="Ops.confirmarEnviarAlyc()">Generar y enviar</button>
@@ -306,6 +319,10 @@ const S = {
   // se aplican en selCliente() para prellenar pctV/manual — ver Senales.aplicar.
   senales: { venta: [], compra: [] },
   tenencias: {},   // { "alyc|cc": { cashPesos, cashUSD, caucionPesos, posiciones } }
+  // Clientes cuya rotación YA se guardó en esta sesión ("alyc|cc"). Última
+  // defensa contra la doble carga: S.guardando cubre el doble click, esto
+  // cubre volver al mismo cliente más tarde. Ver App.guardar().
+  guardados: new Set(),
   alycSel: null, clienteActual: null, tenencia: null, objetivo: {},
   tab: "inicial",
   aporteARS: 0, aporteUSD: 0,
@@ -1317,6 +1334,14 @@ const App = {
       toast("Ya se esta guardando - espera a que termine.","error");
       return;
     }
+    // Volver a un cliente ya guardado y guardar de nuevo NO es un doble click:
+    // el guard de arriba no lo ve, y la planilla del día ACUMULA. Se pregunta,
+    // no se bloquea: rehacer una rotación corregida es legítimo.
+    const _key=`${alyc}|${normCC(cl.cc)}`;
+    if(S.guardados.has(_key) &&
+       !confirm(`Ya guardaste la rotación de ${cl.cliente} (${alyc} ${cl.cc}) en esta sesión.\n\nSi seguís, las órdenes se ACUMULAN otra vez en "03 · Operaciones" — quedan duplicadas.\n\n¿Guardar igual?`)){
+      return;
+    }
     S.guardando=true;
     // El boton se apaga en el acto, sin esperar al proximo render.
     document.querySelectorAll('[data-btn-guardar]').forEach(b=>{
@@ -1346,6 +1371,7 @@ const App = {
     const {ok}=Calc.saldo(disp,compras);
     if(!ok){ toast("Saldo insuficiente","error"); return; }
 
+    let guardadoOk = false;
     showLoad("Guardando rotación...");
     try{
       const h=hoy();
@@ -1367,12 +1393,27 @@ const App = {
       // desde "03 · Operaciones" -> "Enviar a ALyC" -- si no, cargar 30
       // clientes dejaba 30 archivos sueltos en Descargas.
       hideLoad();
+      S.guardados.add(`${alyc}|${normCC(cl.cc)}`);
+      guardadoOk = true;
       toast(`✓ Guardado: ${cl.cliente} — se acumula en "03 · Operaciones"`);
-      await App.siguienteCliente();
     }catch(e){
       hideLoad();
       toast("Error guardando: "+e.message,"error");
       console.error(e);
+    }
+
+    // Avance al cliente siguiente FUERA del try de guardado: carga la tenencia
+    // del que sigue y esa carga RE-LANZA si falla la red, así que estando
+    // adentro un error POSTERIOR a la escritura se mostraba como "Error
+    // guardando" con el mismo cliente en pantalla — se lee como "no guardó",
+    // se aprieta de nuevo y las órdenes entran DOS VECES (2026-08-06).
+    if(guardadoOk){
+      try{
+        await App.siguienteCliente();
+      }catch(e){
+        console.error(e);
+        toast(`La rotación de ${cl.cliente} SE GUARDÓ BIEN, pero no pude pasar al cliente siguiente (${e.message}). Elegilo a mano — NO vuelvas a guardar éste.`,"error");
+      }
     }
   },
 
@@ -1894,18 +1935,33 @@ const Ops = {
     const alyc = $("envAlycSel").value;
     const campoAlyc = Ops.subTab === 'ordenes' ? 'Alyc' : 'ALYC';
     const fuente = Ops.subTab === 'ordenes' ? Ops.rotacionRows : Ops.resultanteRows;
-    const filas = fuente.filter(r => r[campoAlyc] === alyc);
+    let filas = fuente.filter(r => r[campoAlyc] === alyc);
     if(!filas.length){ toast('Sin filas para esa ALyC', 'error'); return; }
+
+    // Precio límite vs. mercado (pedido de Juan, 2026-08-06). A mercado se
+    // escribe "MERCADO" en la columna en vez de vaciarla: una celda vacía se
+    // lee como dato faltante. Se copia el array para no mutar lo que muestra
+    // la pantalla.
+    const aMercado = document.querySelector('input[name="envPrecio"]:checked')?.value === 'mercado';
+    if(aMercado && 'Precio' in filas[0]){
+      filas = filas.map(r => ({ ...r, Precio: 'MERCADO' }));
+    }
 
     const headers = Object.keys(filas[0]);
     const ws = XLSX.utils.json_to_sheet(filas, { header: headers });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, alyc.slice(0, 31));
-    const nombreArchivo = `${alyc}_${hoy()}_${Ops.subTab}.xlsx`;
+    const nombreArchivo = `${alyc}_${hoy()}_${Ops.subTab}${aMercado ? '_MERCADO' : ''}.xlsx`;
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 
     Ops.cerrarEnviarAlyc();
-    XLSX.writeFile(wb, nombreArchivo);
-    toast(`✓ ${nombreArchivo} descargado — adjuntalo a mano en el grupo de ${alyc}`);
+    // Diálogo nativo arrancando en el Escritorio (ver shared/sibra-guardar-archivo.js).
+    const res = await guardarArchivoLocal(buf, nombreArchivo);
+    if(res.cancelado){
+      toast('Cancelaste el guardado — no se generó el archivo.','error');
+      return;
+    }
+    toast(`✓ ${nombreArchivo} guardado — adjuntalo a mano en el grupo de ${alyc}`);
   },
 };
 
