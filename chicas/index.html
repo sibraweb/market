@@ -496,7 +496,14 @@ th:hover { background:var(--bg4); }
       <div class="sec-title" style="margin:0;">Operaciones del día</div>
       <div style="font-size:11px;color:var(--text3);margin-top:4px;" id="histFecha"></div>
     </div>
-    <button class="btn btn-secondary btn-sm" onclick="cargarOperacionesSheets(true)">↻ Actualizar</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-secondary btn-sm" onclick="cargarOperacionesSheets(true)">↻ Actualizar</button>
+      <button class="btn btn-green btn-sm" onclick="exportarGrowCap()">⬇ Excel para GrowCap</button>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin:-8px 0 14px;">
+    El Excel sale con el layout que ya lee GrowCap (mismas columnas que rotaciones).
+    Elegís una ALyC y salen solo sus órdenes.
   </div>
 
   <div class="kpi-row" id="histKpis">
@@ -526,6 +533,7 @@ th:hover { background:var(--bg4); }
 <script src="../shared/sibra-maestros.js"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
+<script src="../shared/sibra-guardar-archivo.js"></script>
 <script>
 // ═══════════════════════════════════════════
 //  CONFIG
@@ -1262,6 +1270,80 @@ function resetEnviadosCompra() { localStorage.removeItem(SENT_KEY_C); renderComp
 // 2026-07-23 (misma que usa el módulo de órdenes de GrowCap): CC arriba,
 // monto ESTIMADO con el spot vivo (es estimado porque la orden va "a
 // Precio de Mercado" — el ejecutado real puede diferir), firma GrowCap.
+// ═══════════════════════════════════════════
+//  EXPORTAR A EXCEL — formato que lee GrowCap
+// ═══════════════════════════════════════════
+// El layout NO es inventado: es el mismo que ya escribe rotaciones, y es el que
+// GrowCap-orders-repo/whatsapp_excel.py sabe leer. Se confirmó mirando su
+// código: construir_mensaje_orden() exige las columnas OPERACION, CANTIDAD,
+// PRECIO y PLAZO, mas una de (ESPECIE|TITULO|TICKER) y una de
+// (COMITENTE|CC|CLIENTE); y su lista COLUMNAS_IGNORADAS es exactamente
+// ID/SOLICITA/OPERADOR/ALYC/CUENTA_ROFEX/MONEDA/MONTO_BRUTO/OBSERVACIONES --
+// o sea, este mismo encabezado. Si se cambia una columna acá, se rompe allá.
+//
+// Precio: por default va la palabra MERCADO, que GrowCap traduce a "Precio de
+// Mercado" (su normalizar() la reconoce). Es lo coherente con chicas, que ya
+// manda "Precio de Mercado" por WhatsApp. La opción de precio spot queda para
+// cuando se quiera dejar el límite calculado.
+const GROWCAP_HEADERS = ["ID","Fecha","Solicita","Operador","Alyc","Comitente","Cuenta Rofex",
+                          "Operación","Especie","Plazo","Cantidad","Precio","Moneda","Monto Bruto","Observaciones"];
+const GROWCAP_PLAZO = "24hs";   // mismo plazo que ya dice el mensaje de WhatsApp
+const GROWCAP_MONEDA = "ARS";
+
+function filasGrowCap(ops, aMercado) {
+  const usuario = (typeof S !== 'undefined' && S?.usuario?.name) || '';
+  return ops.map((o, i) => ({
+    "ID": i + 1,
+    "Fecha": o.fecha,
+    "Solicita": usuario,
+    "Operador": usuario,
+    "Alyc": o.alyc,
+    "Comitente": o.comitente,
+    "Cuenta Rofex": "",
+    // VENTA en negativo, igual que rotaciones (Calc.ordenes usa -cantOp).
+    "Operación": o.tipo,
+    "Especie": o.ticker,
+    "Plazo": GROWCAP_PLAZO,
+    "Cantidad": o.tipo === 'VENTA' ? -Math.abs(o.cantidad) : Math.abs(o.cantidad),
+    "Precio": aMercado ? "MERCADO" : (o.precioSpot || ""),
+    "Moneda": GROWCAP_MONEDA,
+    "Monto Bruto": o.montoARS || "",
+    "Observaciones": "",
+  }));
+}
+
+async function exportarGrowCap() {
+  if (!operHoy.length) { alert('No hay operaciones cargadas hoy'); return; }
+  const alycs = [...new Set(operHoy.map(o => o.alyc).filter(Boolean))].sort();
+
+  // Una sola ALyC: no se pregunta al pedo (esto se usa desde el celular).
+  let alyc = alycs.length === 1 ? alycs[0] : null;
+  if (!alyc) {
+    const opciones = alycs.map((a, i) => `${i + 1}. ${a}`).join('\n');
+    const elegido = prompt(`¿De qué ALyC exportás?\n\n${opciones}\n\n(dejalo vacío para TODAS)`, '1');
+    if (elegido === null) return;
+    const idx = parseInt(elegido, 10);
+    alyc = (idx >= 1 && idx <= alycs.length) ? alycs[idx - 1] : null;
+  }
+
+  const ops = alyc ? operHoy.filter(o => o.alyc === alyc) : operHoy;
+  if (!ops.length) { alert('Sin operaciones para esa ALyC'); return; }
+
+  const aMercado = confirm('¿Todo a precio de MERCADO?\n\nAceptar = MERCADO (lo habitual en chicas)\nCancelar = deja el precio spot de cada orden');
+
+  const filas = filasGrowCap(ops, aMercado);
+  const ws = XLSX.utils.json_to_sheet(filas, { header: GROWCAP_HEADERS });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, (alyc || 'TODAS').slice(0, 31));
+  // GrowCap tambien detecta la ALyC por el NOMBRE del archivo, asi que va adelante.
+  const nombre = `${alyc || 'TODAS'}_chicas_${fechaHoy()}${aMercado ? '_MERCADO' : ''}.xlsx`;
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+
+  const res = await guardarArchivoLocal(buf, nombre);
+  if (res.cancelado) { log('Exportación cancelada', 'log-warn'); return; }
+  log(`✓ ${nombre} — ${filas.length} órdenes listas para GrowCap`, 'log-ok');
+}
+
 function formatOrden(operacion,alyc,comitente,ticker,cantidad) {
   const cli=findCliente(comitente,alyc);
   const nombre=cli?.cliente||comitente;
