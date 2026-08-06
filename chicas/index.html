@@ -939,19 +939,68 @@ function stockReal(alyc, comitente, ticker) {
   return Math.max(tenencia-vendido,0);
 }
 
-// Saldo líquido ARS de un comitente (cash de cartera + producido por ventas hoy)
-function saldoLiquido(alyc, comitente) {
-  // Cash ARS de cartera (ticker canónico 'PESOS', ver CASH_MAP en shared/sibra-brokers-data.js)
-  const cashPos=posiciones.find(p=>p.alyc===alyc&&normCC(p.comitente)===normCC(comitente)&&p.ticker==='PESOS');
-  const cashARS=Math.max(cashPos?.tenencia||0, 0);
-  // Producido por ventas de hoy
-  const ventasHoy=operHoy.filter(o=>o.tipo==='VENTA'&&o.alyc===alyc&&normCC(o.comitente)===normCC(comitente))
+// ── Efectivo existente de un comitente ──────────────────────────────────────
+// Fórmula canónica del sistema, la misma que rotaciones/principe-senales
+// (Calc.disponible; doc en rotaciones/README.md):
+//
+//   efectivo = cashARS + cashUSD×MEP + cauciónARS + cauciónUSD×MEP
+//              + producido de ventas de hoy − gastado en compras de hoy
+//
+// LA CAUCIÓN SE SUMA. No es un error: el efectivo que informa el broker YA
+// viene con la caución tomada descontada — el saldo negativo de la cuenta
+// corriente ES la caución (verificado 2026-07-30 en ADCAP 230760: efectivo ARS
+// −5.721.983 vs caución 5.720.506, coinciden al peso). No sumarla la resta dos
+// veces y la plata desaparece.
+//
+// Y NO se recorta el negativo a cero, que era lo que hacía antes
+// (`Math.max(cash,0)`): el efectivo es negativo justamente en las cuentas que
+// tomaron caución, así que el clamp borraba el caso que más importa. Ejemplo
+// real: efectivo −2.000.000 con caución 5.000.000 son 3.000.000 disponibles, y
+// se mostraban como 0 — el cliente no podía comprar teniendo con qué.
+// Un descubierto real ahora se ve en rojo; esconderlo era peor.
+function saldoDetalle(alyc, comitente) {
+  // getMEP() cae a 1 si data912 todavía no cargó — y eso, acá, valuaría los
+  // dólares a un peso cada uno. Es el mismo bug que en julio le mostró a Silva
+  // Omar US$1.698 como $1.698. Como este número decide CUÁNTO puede comprar
+  // cada cliente, si el MEP no es confiable NO se pesifica: se deja la pata USD
+  // afuera y se avisa, en vez de devolver un total mentiroso.
+  const mepOk = !!(getPrice('AL30') && getPrice('AL30D'));
+  const mep = mepOk ? getMEP() : 0;
+  const cc=normCC(comitente);
+  const cash=t=>{
+    const p=posiciones.find(x=>x.alyc===alyc&&normCC(x.comitente)===cc&&x.ticker===t);
+    return p?.tenencia||0;
+  };
+  const cashARS=cash('PESOS');
+  const cashUSD=cash('USD_MEP');   // solo MEP: divisa/cable no son líquidos acá
+  const cau=caucionesPorCuenta[`${alyc}|${cc}`]||{ars:0,usd:0};
+  const delOperador=(tipo)=>operHoy
+    .filter(o=>o.tipo===tipo&&o.alyc===alyc&&normCC(o.comitente)===cc)
     .reduce((s,o)=>s+o.montoARS,0);
-  // Gastado en compras de hoy
-  const comprasHoy=operHoy.filter(o=>o.tipo==='COMPRA'&&o.alyc===alyc&&normCC(o.comitente)===normCC(comitente))
-    .reduce((s,o)=>s+o.montoARS,0);
-  return Math.max(cashARS+ventasHoy-comprasHoy, 0);
+  const ventasHoy=delOperador('VENTA');
+  const comprasHoy=delOperador('COMPRA');
+  // Patas por moneda: si al final queda POSITIVO en USD y NEGATIVO en ARS, no
+  // falta plata — falta operar el MEP. Se exponen para poder avisarlo.
+  const patAR = cashARS + cau.ars + ventasHoy - comprasHoy;
+  const patUSD = cashUSD + cau.usd;
+  return {
+    cashARS, cashUSD, caucionARS:cau.ars, caucionUSD:cau.usd,
+    ventasHoy, comprasHoy, mep, mepOk,
+    patAR, patUSD,
+    total: patAR + patUSD*mep,
+    // true = tiene con qué, pero hay que pasar dólares a pesos primero
+    necesitaMEP: patAR < 0 && patUSD > 0,
+    // true = hay dólares que NO están contados porque falta el MEP
+    usdSinValuar: !mepOk && patUSD !== 0,
+  };
 }
+
+function saldoLiquido(alyc, comitente) {
+  return saldoDetalle(alyc, comitente).total;
+}
+
+// Verde en positivo, rojo en negativo — en todo, siempre (Juan, 2026-08-06).
+function clsSaldo(n){ return n>0?'color:var(--green)':n<0?'color:var(--red-light)':'color:var(--text2)'; }
 
 // ═══════════════════════════════════════════
 //  TOTALES NETOS Y BRUTOS POR CLIENTE
@@ -1402,11 +1451,12 @@ function renderCompras() {
     const ck=compraKey(p.alyc,p.comitente);
     if(comitentesVistos.has(ck)) return;
     comitentesVistos.add(ck);
-    const saldo=saldoLiquido(p.alyc,p.comitente);
-    if(saldo<=0) return;
+    const det=saldoDetalle(p.alyc,p.comitente);
+    const saldo=det.total;
+    if(saldo<=0) return;   // sin plata no es candidato a comprar; el rojo se ve en "Saldos"
     const cantMax=Math.floor(saldo/precio);
     if(cantMax<=0) return;
-    filas.push({alyc:p.alyc,comitente:p.comitente,saldo,cantMax});
+    filas.push({alyc:p.alyc,comitente:p.comitente,saldo,cantMax,necesitaMEP:det.necesitaMEP,usdSinValuar:det.usdSinValuar});
   });
 
   if(!sortState.field) filas.sort((a,b)=>b.saldo-a.saldo);
@@ -1450,7 +1500,7 @@ function renderCompras() {
         <td><span style="font-size:10px;font-weight:700;color:var(--text2);">${f.alyc}</span></td>
         <td style="font-weight:700;">CC ${f.comitente}</td>
         <td style="color:var(--text2);">${nombre}</td>
-        <td class="td-r" style="color:var(--green);">$${fmt(f.saldo)}</td>
+        <td class="td-r" style="${clsSaldo(f.saldo)}">$${fmt(f.saldo)}${f.necesitaMEP?' <span title="Positivo en USD y negativo en pesos: hay con qué, pero hay que operar el MEP primero" style="color:var(--amber)">⇄</span>':''}${f.usdSinValuar?' <span title="Hay dólares sin contar: falta el MEP (AL30/AL30D de data912)" style="color:var(--amber)">⚠</span>':''}</td>
         <td class="td-r" style="color:var(--text2);">${fmt(f.cantMax)}</td>
         <td class="td-r">
           <div class="cant-wrap">
@@ -1597,16 +1647,33 @@ function resetCompras() { compraTicker=null; compraCants={}; $('compraTickerInpu
 // ═══════════════════════════════════════════
 //  PANEL: SALDOS NEGATIVOS
 // ═══════════════════════════════════════════
+// Descubierto REAL, no el saldo crudo del broker.
+// Antes esta pestaña listaba cualquier posición de efectivo con tenencia<0, y
+// eso marcaba en rojo a cuentas que no deben nada: el negativo de la cuenta
+// corriente ES la caución tomada (ver saldoDetalle). O sea que se avisaba —y se
+// exportaba a WhatsApp— un descubierto inexistente. Ahora se mira el neto por
+// cuenta: efectivo + caución, pesificado al MEP.
+function cuentasConSaldo(alycFil) {
+  const vistas=new Set(); const out=[];
+  posiciones.forEach(p=>{
+    if(alycFil&&p.alyc!==alycFil) return;
+    const k=`${p.alyc}|${normCC(p.comitente)}`;
+    if(vistas.has(k)) return;
+    vistas.add(k);
+    const d=saldoDetalle(p.alyc,p.comitente);
+    out.push({alyc:p.alyc, comitente:p.comitente, cli:findCliente(p.comitente,p.alyc)?.cliente||'—', ...d});
+  });
+  return out;
+}
+
 function renderNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
-  let filas=posiciones
-    .filter(p=>isCashTicker(p.ticker)&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}));
-  if(!sortState.field) filas.sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
+  let filas=cuentasConSaldo(alycFil).filter(c=>c.total<0);
+  if(!sortState.field) filas.sort((a,b)=>a.total-b.total);   // el más rojo arriba
   else filas=sortRows(filas,'alyc');
   const el=$('negativosBody');
   if(!filas.length){
-    el.innerHTML='<div class="empty-state"><div class="es-icon">✅</div><p>Sin saldos negativos</p></div>';
+    el.innerHTML='<div class="empty-state"><div class="es-icon">✅</div><p>Sin descubiertos reales</p><small>Se mira efectivo + caución pesificado al MEP, no el saldo crudo del broker</small></div>';
     return;
   }
   el.innerHTML=`<div class="table-wrap"><table>
@@ -1614,25 +1681,28 @@ function renderNegativoss() {
       <th onclick="handleSort(event,'alyc','negativos')">ALyC<span class="sort-icon"></span></th>
       <th onclick="handleSort(event,'comitente','negativos')">CC<span class="sort-icon"></span></th>
       <th onclick="handleSort(event,'cli','negativos')">Cliente<span class="sort-icon"></span></th>
-      <th onclick="handleSort(event,'ticker','negativos')">Moneda<span class="sort-icon"></span></th>
-      <th class="td-r" onclick="handleSort(event,'tenencia','negativos')">Saldo<span class="sort-icon"></span></th>
+      <th class="td-r">Efectivo ARS</th>
+      <th class="td-r">Efectivo USD</th>
+      <th class="td-r">Caución</th>
+      <th class="td-r" onclick="handleSort(event,'total','negativos')">Descubierto<span class="sort-icon"></span></th>
     </tr></thead>
-    <tbody>${filas.map(p=>`<tr>
-      <td>${p.alyc}</td><td>${p.comitente}</td><td>${p.cli}</td>
-      <td>${cashLabel(p.ticker)}</td>
-      <td class="td-r" style="color:var(--red-light)">${p.ticker==='PESOS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}</td>
+    <tbody>${filas.map(c=>`<tr>
+      <td>${c.alyc}</td><td>${c.comitente}</td><td>${c.cli}</td>
+      <td class="td-r" style="${clsSaldo(c.cashARS)}">$${fmt(c.cashARS,0)}</td>
+      <td class="td-r" style="${clsSaldo(c.cashUSD)}">U$S ${fmt(c.cashUSD,2)}</td>
+      <td class="td-r" style="color:var(--text2)">$${fmt(c.caucionARS+c.caucionUSD*c.mep,0)}</td>
+      <td class="td-r" style="${clsSaldo(c.total)};font-weight:700">$${fmt(c.total,0)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
 function waNegativoss() {
   const alycFil=$('negFilterAlyc')?.value||'';
-  const filas=posiciones
-    .filter(p=>isCashTicker(p.ticker)&&p.tenencia<0&&(!alycFil||p.alyc===alycFil))
-    .map(p=>({...p,cli:findCliente(p.comitente,p.alyc)?.cliente||'—'}))
-    .sort((a,b)=>a.alyc.localeCompare(b.alyc)||a.comitente.localeCompare(b.comitente));
-  if(!filas.length){alert('Sin saldos negativos para exportar');return;}
-  const titulo=`*Saldos negativos${alycFil?' - '+alycFil:''}*\n`;
-  const lineas=filas.map(p=>`${p.alyc} | ${p.comitente} | ${p.cli} | ${cashLabel(p.ticker)} | ${p.ticker==='PESOS'?'$'+fmt(p.tenencia,0):'U$S '+fmt(p.tenencia,2)}`);
+  // Mismo criterio que la tabla: descubierto NETO. Esto se manda por WhatsApp,
+  // así que mandar el saldo crudo era avisar deudas que no existen.
+  const filas=cuentasConSaldo(alycFil).filter(c=>c.total<0).sort((a,b)=>a.total-b.total);
+  if(!filas.length){alert('Sin descubiertos reales para exportar');return;}
+  const titulo=`*Descubiertos (efectivo + caución al MEP)${alycFil?' - '+alycFil:''}*\n`;
+  const lineas=filas.map(c=>`${c.alyc} | ${c.comitente} | ${c.cli} | $${fmt(c.total,0)}`);
   window.open('https://wa.me/?text='+encodeURIComponent(titulo+lineas.join('\n')));
 }
 
