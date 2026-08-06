@@ -1285,8 +1285,15 @@ function resetEnviadosCompra() { localStorage.removeItem(SENT_KEY_C); renderComp
 // Mercado" (su normalizar() la reconoce). Es lo coherente con chicas, que ya
 // manda "Precio de Mercado" por WhatsApp. La opción de precio spot queda para
 // cuando se quiera dejar el límite calculado.
+// "Mensaje" al final: whatsapp_excel.py busca esa columna (COLUMNAS_MENSAJE) y,
+// si está, MANDA ESE TEXTO TAL CUAL en vez de rearmar el mensaje desde las
+// columnas. Así la mesa recibe exactamente el mismo formato que ya recibe hoy
+// por WhatsApp desde chicas — con monto total, ALyC, fecha y hora, y el pie
+// "GrowCap by SIBRATECH". Su agregar_pie_alyc() normaliza ese pie (saca el
+// duplicado y lo vuelve a poner), así que no queda repetido.
 const GROWCAP_HEADERS = ["ID","Fecha","Solicita","Operador","Alyc","Comitente","Cuenta Rofex",
-                          "Operación","Especie","Plazo","Cantidad","Precio","Moneda","Monto Bruto","Observaciones"];
+                          "Operación","Especie","Plazo","Cantidad","Precio","Moneda","Monto Bruto","Observaciones",
+                          "Mensaje"];
 const GROWCAP_PLAZO = "24hs";   // mismo plazo que ya dice el mensaje de WhatsApp
 const GROWCAP_MONEDA = "ARS";
 
@@ -1309,6 +1316,13 @@ function filasGrowCap(ops, aMercado) {
     "Moneda": GROWCAP_MONEDA,
     "Monto Bruto": o.montoARS || "",
     "Observaciones": "",
+    // El mensaje ya armado, con el monto REGISTRADO de la operación (no una
+    // estimación) y la fecha/hora en que se cargó.
+    "Mensaje": formatOrden(tituloOperacion(o.tipo), o.alyc, o.comitente, o.ticker, o.cantidad, {
+      precio: aMercado ? null : (o.precioSpot || null),
+      monto: o.montoARS ?? null,
+      fecha: `${o.fecha} ${o.hora || ''}`.trim(),
+    }),
   }));
 }
 
@@ -1344,12 +1358,32 @@ async function exportarGrowCap() {
   log(`✓ ${nombre} — ${filas.length} órdenes listas para GrowCap`, 'log-ok');
 }
 
-function formatOrden(operacion,alyc,comitente,ticker,cantidad) {
+// UNA sola definición del mensaje de orden, para WhatsApp y para el Excel. Si
+// se duplicara, con el tiempo se separan y la mesa recibe dos formatos
+// distintos según por dónde salió la orden.
+//   opts.precio  -> null = "Precio de Mercado" (lo habitual acá); un número
+//                   escribe "Precio N"
+//   opts.monto   -> monto YA registrado de la operación. Si no viene, se calcula
+//                   con el spot del momento. En los dos casos la línea dice
+//                   "Monto total": la mesa lee un solo formato, salga la orden
+//                   por WhatsApp o por el Excel de GrowCap.
+//   opts.fecha   -> fecha/hora de la operación registrada (si no, ahora)
+function formatOrden(operacion,alyc,comitente,ticker,cantidad,opts={}) {
   const cli=findCliente(comitente,alyc);
   const nombre=cli?.cliente||comitente;
-  const precio=getPrice(ticker);
-  const montoLinea=precio?`\n\nMonto estimado: Ars ${(cantidad*precio).toFixed(2)}`:'';
-  return `CC ${comitente} - ${nombre}\nOperación ${operacion}\nTítulo ${ticker}\nCantidad ${cantidad}\nPrecio de Mercado\nPlazo 24hs${montoLinea}\n\nFecha y Hora: ${fechaLegible()}\n\nALyC: ${alyc}\n\nGrowCap by SIBRATECH`;
+  const precio=opts.precio ?? null;
+  const lineaPrecio = precio!==null ? `Precio ${precio}` : 'Precio de Mercado';
+  const monto = opts.monto!=null ? Number(opts.monto)
+                                 : (getPrice(ticker) ? Math.abs(cantidad)*getPrice(ticker) : null);
+  const montoLinea = monto!=null ? `\n\nMonto total: Ars ${monto.toFixed(2)}` : '';
+  return `CC ${comitente} - ${nombre}\nOperación ${operacion}\nTítulo ${ticker}\nCantidad ${Math.abs(cantidad)}\n${lineaPrecio}\nPlazo ${GROWCAP_PLAZO}${montoLinea}\n\nFecha y Hora: ${opts.fecha||fechaLegible()}\n\nALyC: ${alyc}\n\nGrowCap by SIBRATECH`;
+}
+
+// Título en castellano tal como lo espera la mesa ("Venta"/"Compra"), a partir
+// del tipo guardado en operHoy ("VENTA"/"COMPRA").
+function tituloOperacion(tipo){
+  const t=String(tipo||'').toUpperCase();
+  return t==='VENTA'?'Venta':t==='COMPRA'?'Compra':t;
 }
 function formatVenta(p,cantidad) { return formatOrden('Venta',p.alyc,p.comitente,p.ticker,cantidad); }
 function formatCompra(alyc,comitente,ticker,cantidad) { return formatOrden('Compra',alyc,comitente,ticker,cantidad); }
