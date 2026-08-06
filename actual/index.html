@@ -1110,7 +1110,13 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
   <!-- Los filtros son los GLOBALES (se setean en Cartera o Dashboard y valen
        acá también). No se duplican los selectores porque el autocomplete está
        cableado a esas dos superficies; se muestra qué filtro está activo. -->
+  <!-- Selector de ALyC propio: es el filtro que más se usa acá (ver las
+       cuentas de ADCAP separadas de las de IEB) y son 3 valores, así que no
+       hace falta el autocomplete. Escribe sobre el MISMO FG.alycs global, así
+       que lo que se elige acá vale también en Cartera y Dashboard: un solo
+       filtro para toda la app, no tres que se contradicen. -->
   <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
+    <div class="subtab-row" id="rendAlycRow" style="margin:0;"></div>
     <div id="rendFiltroInfo" style="font-size:11px; color:var(--text2);"></div>
     <button class="btn-secondary" style="font-size:11px; padding:7px 14px;" onclick="App.limpiarFiltroGlobal(); App.aplicarFiltroGlobal();">✕ Limpiar filtros</button>
     <div style="flex:1"></div>
@@ -2463,9 +2469,34 @@ function rendFilaTotales(label, t, nivel) {
   </tr>`;
 }
 
+// Selector de ALyC (Todas / ADCAP / BCCH / IEB...). Escribe FG.alycs, el mismo
+// filtro global del resto de la app — no un filtro paralelo.
+function setRendAlyc(alyc) {
+  FG.alycs.clear();
+  if (alyc) FG.alycs.add(alyc);
+  // Redibuja los chips de Cartera/Dashboard desde el store (NO clearAll, que
+  // vaciaría lo que acabamos de poner): si no, esas pestañas quedarían
+  // filtradas por ADCAP mostrando "sin filtros", que es peor que no filtrar.
+  AC.alycs?.renderChips?.();
+  AC.alycs?.updateInputPlaceholder?.();
+  aplicarFiltroGlobal();
+}
+
+function renderRendAlycs() {
+  const cont = $('rendAlycRow');
+  if (!cont) return;
+  const alycs = [...new Set((cartDataCache || []).map(p => p.alyc).filter(Boolean))].sort();
+  if (alycs.length < 2) { cont.innerHTML = ''; return; }   // con una sola ALyC no hay qué separar
+  const activa = FG.alycs.size === 1 ? [...FG.alycs][0] : null;
+  const chip = (val, label) =>
+    `<div class="subtab ${activa === val ? 'active' : ''}" onclick="App.setRendAlyc(${val ? `'${val}'` : 'null'})">${label}</div>`;
+  cont.innerHTML = chip(null, 'Todas') + alycs.map(a => chip(a, a)).join('');
+}
+
 function renderRendimiento() {
   const tbody = $('rendTbody');
   if (!tbody) return;
+  renderRendAlycs();
   const data = (cartDataCache || []).filter(p => {
     if (REND_CASH.has(p.ticker)) return false;   // el efectivo no tiene costo propio
     if (FG.clientes.size > 0 && !FG.clientes.has(p.comitente)) return false;
@@ -2479,8 +2510,8 @@ function renderRendimiento() {
   if (FG.alycs.size)    filtros.push(`${FG.alycs.size} ALyC(s)`);
   if (FG.tickers.size)  filtros.push(`${FG.tickers.size} ticker(s)`);
   $('rendFiltroInfo').textContent = filtros.length
-    ? 'Filtrado por ' + filtros.join(' · ') + ' (se setea en Cartera o Dashboard)'
-    : 'Sin filtros — todas las cuentas';
+    ? 'Filtrado por ' + filtros.join(' · ')
+    : 'Todas las cuentas';
 
   const global = rendTotales(data);
   const hayCalculo = global.con > 0;
@@ -3533,7 +3564,7 @@ return {
   procesarArchivos, loadData, fetchPrices, fetchMEP,
   onAlycChange, onClienteChange, onRotAlycChange,
   filtrarCartera, limpiarFiltroGlobal, aplicarFiltroGlobal, sortCartera,
-  renderRendimiento, toggleRendGrupo,
+  renderRendimiento, toggleRendGrupo, setRendAlyc,
   applyDashFilters, clearDashFilter, clearDashFilters,
   actualizarDashboard,
   populateAllocFilters, toggleAllocDrop, allocCheckChange, allocTodosChange, allocSearchFilter, clearAllocFilters, setAllocView, actualizarAllocations,
