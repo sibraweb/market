@@ -122,6 +122,12 @@ tfoot td{border-top:1px solid var(--border2);font-weight:700;background:#0f0f0f;
       <button class="btn" data-m="USD">Dólares</button>
     </div>
   </div>
+  <div class="campo"><label>Ver</label>
+    <div class="grupo" id="modo">
+      <button class="btn active" data-v="valor">Valor</button>
+      <button class="btn" data-v="rend">Rendimiento</button>
+    </div>
+  </div>
   <div class="campo"><label>Frecuencia</label>
     <div class="grupo" id="freq">
       <button class="btn active" data-f="W">Semanal</button>
@@ -134,7 +140,7 @@ tfoot td{border-top:1px solid var(--border2);font-weight:700;background:#0f0f0f;
   <button class="btn active" data-t="evolucion">Evolución</button>
   <button class="btn" data-t="abiertas">Posiciones abiertas</button>
   <button class="btn" data-t="cerradas">Posiciones cerradas</button>
-  <button class="btn" data-t="mensual">Resultado por mes</button>
+  <button class="btn" data-t="mensual">Rendimientos</button>
   <button class="btn" data-t="rentas">Rentas y dividendos</button>
   <button class="btn" data-t="control">Control</button>
 </div>
@@ -165,7 +171,8 @@ tfoot td{border-top:1px solid var(--border2);font-weight:700;background:#0f0f0f;
 
 <section id="tab-mensual" class="hidden">
   <div class="kpis" id="kpisMensual"></div>
-  <div class="card"><div class="card-title">Resultado realizado por mes</div>
+  <div class="card"><div class="card-title">Rendimiento de la cartera por período
+      <span class="muted">· el feed que arma el TWR y el MWR · semanal o mensual según la frecuencia</span></div>
     <div class="tbl-wrap" id="tMensual"></div></div>
 </section>
 
@@ -199,7 +206,7 @@ tfoot td{border-top:1px solid var(--border2);font-weight:700;background:#0f0f0f;
 // ═══════════════════════════════════════════════════════════════════════
 const S = {
   curva: [], realizado: [], abiertas: [], mensual: [], rentas: [], tenencias: [],
-  moneda: 'ARS', freq: 'W', tab: 'evolucion',
+  moneda: 'ARS', freq: 'W', tab: 'evolucion', modo: 'valor',
   sel: { cliente: [], alyc: [], cuenta: [], ticker: [] },
   orden: {},
 };
@@ -355,6 +362,13 @@ function xirr(flujos) {
   return (lo + hi) / 2;
 }
 
+// MWR acumulado hasta CADA corte: la TIR sobre los flujos desde el inicio de
+// la ventana hasta ese punto. Es lo que permite verlo como serie y no como un
+// solo número al final.
+function tirAcumulada(s) {
+  return s.map((_, i) => (i === 0 ? null : tirCartera(s.slice(0, i + 1))));
+}
+
 function tirCartera(s) {
   if (s.length < 2) return null;
   const d = f => new Date(f + 'T00:00:00');
@@ -412,20 +426,34 @@ function vEvolucion() {
     { t: 'Mejor período', v: rets.length ? pct(Math.max(...rets)) : '—', cls: 'pos' },
     { t: 'Peor período', v: rets.length ? pct(Math.min(...rets)) : '—', cls: 'neg' },
   ]);
+  // VALOR o RENDIMIENTO, como en IBKR: son dos lecturas distintas de lo mismo.
+  // En VALOR se ve la plata (y el efectivo debajo, para saber qué parte no está
+  // invertida). En RENDIMIENTO se ven las dos formas de medirlo juntas —TWR,
+  // que aísla la gestión, y MWR, que mide lo que le rindió la plata al cliente.
+  const porValor = S.modo === 'valor';
+  const mwr = porValor ? [] : tirAcumulada(s);
   if (chart) chart.destroy();
   chart = new Chart($('#grafico'), {
     type: 'line',
-    data: { labels: s.map(f => f.fecha), datasets: [
+    data: { labels: s.map(f => f.fecha), datasets: porValor ? [
       { label: `Valor (${sim()})`, data: s.map(f => f.valor), borderColor: '#E10600',
-        backgroundColor: 'rgba(225,6,0,.10)', fill: true, tension: .25, pointRadius: 0, yAxisID: 'y' },
-      { label: 'Acumulado %', data: s.map(f => f.acum), borderColor: '#22c55e',
-        borderDash: [5, 4], fill: false, tension: .25, pointRadius: 0, yAxisID: 'y1' }] },
+        backgroundColor: 'rgba(225,6,0,.10)', fill: true, tension: .25, pointRadius: 0 },
+      { label: `Efectivo (${sim()})`, data: s.map(f => esUSD() ? f.caja_usd : f.caja_ars),
+        borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,.10)', fill: true,
+        tension: .25, pointRadius: 0 },
+    ] : [
+      { label: 'Rentabilidad TWR %', data: s.map(f => f.acum), borderColor: '#22c55e',
+        backgroundColor: 'rgba(34,197,94,.10)', fill: true, tension: .25, pointRadius: 0 },
+      { label: 'TIR anualizada MWR %', data: mwr, borderColor: '#fbbf24',
+        borderDash: [5, 4], fill: false, tension: .25, pointRadius: 0 },
+    ] },
     options: { responsive: true, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { labels: { color: '#b8b8b8', font: { size: 11 } } } },
       scales: {
         x: { ticks: { color: '#888', maxTicksLimit: 14, font: { size: 10 } }, grid: { color: '#1f1f1f' } },
-        y: { ticks: { color: '#888', font: { size: 10 }, callback: v => fmt(v, 0) }, grid: { color: '#1f1f1f' } },
-        y1: { position: 'right', ticks: { color: '#22c55e', font: { size: 10 }, callback: v => fmt(v, 1) + '%' }, grid: { display: false } } } },
+        y: { ticks: { color: '#888', font: { size: 10 },
+                      callback: v => porValor ? fmt(v, 0) : fmt(v, 1) + '%' },
+             grid: { color: '#1f1f1f' } } } },
   });
   tabla('#tPeriodos', [
     { k: 'fecha', t: 'Corte' },
@@ -497,29 +525,37 @@ function vCerradas() {
 }
 
 function vMensual() {
-  const u = esUSD();
-  const f = S.mensual.filter(r => pasa(r) && enVentana(String(r.mes).length === 7 ? r.mes + '-01' : r.mes));
-  const col = u ? 'resultado_usd' : 'resultado_total_ars';
-  const total = f.reduce((s, r) => s + num(r[col]), 0);
-  const incompletos = f.filter(r => String(r.resultado_usd_incompleto).toLowerCase() === 'sí'
-                                 || String(r.resultado_usd_incompleto).toLowerCase() === 'si').length;
+  // EL FEED DE LA CARTERA, no una fila por posición: eso era ilegible y además
+  // no es lo que se mira para juzgar la gestión (Juan, 2026-08-10). Una fila
+  // por período —semanal o mensual según la frecuencia— con las dos medidas.
+  const s = serieAgregada();
+  const mwr = tirAcumulada(s);
+  const filas = s.map((f, i) => ({ ...f, mwr: mwr[i] })).reverse();
+  const ult = s[s.length - 1];
+  const rets = s.map(f => f.retorno).filter(v => v != null);
+  const positivos = rets.filter(v => v > 0).length;
   kpis('#kpisMensual', [
-    { t: `Resultado total (${sim()})`, v: fmt(total, 0), cls: signo(total) },
-    { t: 'Meses', v: String(new Set(f.map(r => r.mes)).size) },
-    { t: 'Filas', v: String(f.length) },
-    ...(u && incompletos ? [{ t: 'Sin MEP completo', v: String(incompletos), cls: 'neg' }] : []),
+    { t: 'Rentabilidad TWR', v: ult ? pct(ult.acum) : '—', cls: ult ? signo(ult.acum) : '' },
+    { t: 'TIR anualizada MWR', v: pct(mwr[mwr.length - 1]), cls: signo(mwr[mwr.length - 1]) },
+    { t: `Períodos ${S.freq === 'W' ? 'semanales' : 'mensuales'}`, v: String(s.length) },
+    { t: 'En positivo', v: rets.length ? `${positivos} de ${rets.length}` : '—', cls: 'pos' },
+    { t: `Variación (${sim()})`, v: s.length > 1 ? fmt(ult.valor - s[0].valor, 0) : '—',
+      cls: s.length > 1 ? signo(ult.valor - s[0].valor) : '' },
   ]);
   tabla('#tMensual', [
-    { k: 'mes', t: 'Mes' }, { k: 'ticker', t: 'Título' },
-    { k: 'broker_code', t: 'ALyC' }, { k: 'account', t: 'Comitente' },
-    { k: 'client_name', t: 'Cliente' },
-    { k: 'resultado_ars', t: 'Result. precio $', n: 1, color: 1, f: r => fmt(num(r.resultado_ars), 0) },
-    { k: 'rentas_cobradas_ars', t: 'Rentas $', n: 1, f: r => fmt(num(r.rentas_cobradas_ars), 0) },
-    { k: 'resultado_total_ars', t: 'Total $', n: 1, color: 1, f: r => fmt(num(r.resultado_total_ars), 0) },
-    { k: 'resultado_usd', t: 'Total US$', n: 1, color: 1, f: r => fmt(num(r.resultado_usd), 0) },
-    { k: 'n_operaciones', t: 'Operaciones', n: 1, f: r => fmt(num(r.n_operaciones), 0) },
-  ], f, { mes: `${f.length} filas`, [col]: fmt(total, 0), [col + '_cls']: signo(total) });
+    { k: 'fecha', t: S.freq === 'W' ? 'Semana' : 'Mes' },
+    { k: 'valor', t: `Valor ${sim()}`, n: 1, f: f => fmt(f.valor, 0) },
+    { k: esUSD() ? 'caja_usd' : 'caja_ars', t: `Efectivo ${sim()}`, n: 1, color: 1,
+      f: f => fmt(esUSD() ? f.caja_usd : f.caja_ars, 0) },
+    { k: 'flujo', t: `Aportes/retiros ${sim()}`, n: 1, color: 1, f: f => fmt(f.flujo, 0) },
+    { k: 'retorno', t: 'Del período', n: 1, color: 1, f: f => pct(f.retorno) },
+    { k: 'acum', t: 'TWR acumulado', n: 1, color: 1, f: f => pct(f.acum) },
+    { k: 'mwr', t: 'MWR anualizado', n: 1, color: 1, f: f => pct(f.mwr) },
+    { k: 'n', t: 'Posiciones', n: 1, f: f => fmt(f.n, 0) },
+  ], filas, { fecha: `${s.length} períodos`,
+              acum: ult ? pct(ult.acum) : '', acum_cls: ult ? signo(ult.acum) : '' });
 }
+
 
 function vRentas() {
   const f = S.rentas.filter(r => pasa(r) && enVentana(r.fecha));
@@ -652,6 +688,7 @@ function grupo(host, campo, cb) {
 grupo('#presets', 'p', v => { aplicarPreset(v); render(); });
 grupo('#moneda', 'm', v => { S.moneda = v; render(); });
 grupo('#freq', 'f', v => { S.freq = v; render(); });
+grupo('#modo', 'v', v => { S.modo = v; render(); });
 grupo('#nav', 't', v => { S.tab = v; render(); });
 $('#desde').onchange = $('#hasta').onchange = () => {
   $('#presets').querySelectorAll('.btn').forEach(x => x.classList.remove('active'));
