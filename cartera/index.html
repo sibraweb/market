@@ -530,7 +530,17 @@ function vMensual() {
   // por período —semanal o mensual según la frecuencia— con las dos medidas.
   const s = serieAgregada();
   const mwr = tirAcumulada(s);
-  const filas = s.map((f, i) => ({ ...f, mwr: mwr[i] })).reverse();
+  // MWR DEL PLAZO al lado del anualizado: la TIR anual capitalizada por los
+  // días que realmente pasaron. Sin eso, en una ventana corta el anualizado da
+  // números que no informan nada — un 2% en dos semanas anualiza a 68%.
+  const t0 = s.length ? new Date(s[0].fecha) : null;
+  const filas = s.map((f, i) => {
+    const dias = t0 ? (new Date(f.fecha) - t0) / 86400000 : 0;
+    const anual = mwr[i];
+    return { ...f, mwr: anual,
+             mwrPlazo: (anual == null || dias <= 0) ? null
+                       : (Math.pow(1 + anual / 100, dias / 365) - 1) * 100 };
+  }).reverse();
   const ult = s[s.length - 1];
   const rets = s.map(f => f.retorno).filter(v => v != null);
   const positivos = rets.filter(v => v > 0).length;
@@ -550,6 +560,7 @@ function vMensual() {
     { k: 'flujo', t: `Aportes/retiros ${sim()}`, n: 1, color: 1, f: f => fmt(f.flujo, 0) },
     { k: 'retorno', t: 'Del período', n: 1, color: 1, f: f => pct(f.retorno) },
     { k: 'acum', t: 'TWR acumulado', n: 1, color: 1, f: f => pct(f.acum) },
+    { k: 'mwrPlazo', t: 'MWR del plazo', n: 1, color: 1, f: f => pct(f.mwrPlazo) },
     { k: 'mwr', t: 'MWR anualizado', n: 1, color: 1, f: f => pct(f.mwr) },
     { k: 'n', t: 'Posiciones', n: 1, f: f => fmt(f.n, 0) },
   ], filas, { fecha: `${s.length} períodos`,
