@@ -411,7 +411,7 @@ function vAbiertas() {
     { k: 'dias_tenencia', t: 'DPT', n: 1, f: r => fmt(num(r.dias_tenencia), 0) },
     { k: u ? 'tir_anual_pct_usd' : 'tir_anual_pct', t: 'TIR anual', n: 1, color: 1, f: r => pct(g(r, 'tir_anual_pct')) },
     { k: 'fecha_primera_compra', t: 'Desde', f: r => String(r.fecha_primera_compra || '').slice(0, 10) },
-  ], { ticker: `${f.length} posiciones`, [u ? 'valor_mercado_usd' : 'valor_mercado']: fmt(valor, 0) });
+  ], f, { ticker: `${f.length} posiciones`, [u ? 'valor_mercado_usd' : 'valor_mercado']: fmt(valor, 0) });
 }
 
 function vCerradas() {
@@ -441,7 +441,7 @@ function vCerradas() {
     { k: u ? 'resultado_total_pct_usd' : 'resultado_total_pct', t: '% total', n: 1, color: 1, f: r => pct(g(r, 'resultado_total_pct')) },
     { k: u ? 'tir_plazo_pct_usd' : 'tir_plazo_pct', t: 'TIR plazo', n: 1, color: 1, f: r => pct(g(r, 'tir_plazo_pct')) },
     { k: u ? 'tir_anual_pct_usd' : 'tir_anual_pct', t: 'TIR anual', n: 1, color: 1, f: r => pct(g(r, 'tir_anual_pct')) },
-  ], { fecha_venta: `${f.length} cierres`, [u ? 'resultado_total_usd' : 'resultado_total']: fmt(total, 0),
+  ], f, { fecha_venta: `${f.length} cierres`, [u ? 'resultado_total_usd' : 'resultado_total']: fmt(total, 0),
        [(u ? 'resultado_total_usd' : 'resultado_total') + '_cls']: signo(total) });
 }
 
@@ -467,7 +467,7 @@ function vMensual() {
     { k: 'resultado_total_ars', t: 'Total $', n: 1, color: 1, f: r => fmt(num(r.resultado_total_ars), 0) },
     { k: 'resultado_usd', t: 'Total US$', n: 1, color: 1, f: r => fmt(num(r.resultado_usd), 0) },
     { k: 'n_operaciones', t: 'Operaciones', n: 1, f: r => fmt(num(r.n_operaciones), 0) },
-  ], { mes: `${f.length} filas`, [col]: fmt(total, 0), [col + '_cls']: signo(total) });
+  ], f, { mes: `${f.length} filas`, [col]: fmt(total, 0), [col + '_cls']: signo(total) });
 }
 
 function vRentas() {
@@ -485,7 +485,7 @@ function vRentas() {
     { k: 'monto_total', t: 'Monto $', n: 1, color: 1, f: r => fmt(num(r.monto_total), 2) },
     { k: 'cantidad_abierta', t: 'Cantidad', n: 1, f: r => fmt(num(r.cantidad_abierta), 0) },
     { k: 'renta_por_titulo', t: 'Por título', n: 1, f: r => fmt(num(r.renta_por_titulo), 4) },
-  ], { fecha: `${f.length} pagos`, monto_total: fmt(total, 2), monto_total_cls: 'pos' });
+  ], f, { fecha: `${f.length} pagos`, monto_total: fmt(total, 2), monto_total_cls: 'pos' });
 }
 
 // ── Control ────────────────────────────────────────────────────────────
