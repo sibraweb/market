@@ -307,11 +307,15 @@ function serieAgregada() {
   const por = new Map();
   S.curva.filter(r => r.freq === S.freq && pasa(r, false) && enVentana(r.fecha)).forEach(r => {
     const f = String(r.fecha).slice(0, 10);
-    const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0 };
+    const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0, caja_ars: 0, caja_usd: 0 };
     const fx = num(r.fx) || 1;
     a.valor += num(esUSD() ? r.valor_usd : r.valor_ars);
     a.flujo += esUSD() ? num(r.flujo_ars) / fx : num(r.flujo_ars);
     a.n += num(r.n_posiciones);
+    // El efectivo se muestra aparte del total: es la parte de la cartera que
+    // no está invertida (o que está colocada en caución, ver performance.py).
+    a.caja_ars += num(r.caja_ars);
+    a.caja_usd += num(r.caja_usd);
     por.set(f, a);
   });
   const filas = [...por.values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -323,6 +327,44 @@ function serieAgregada() {
     f.acum = i === 0 ? 0 : (acum - 1) * 100;
   });
   return filas;
+}
+
+// ── TIR anualizada de la cartera (MWR) ─────────────────────────────────
+// Los dos números miden cosas distintas y por eso van juntos, como en el
+// homebroker de BCCH:
+//   RENTABILIDAD (TWR)  mide la GESTIÓN: neutraliza aportes y retiros, así que
+//                       no cambia porque el cliente ponga o saque plata.
+//   TIR ANUALIZADA (MWR) mide lo que le rindió LA PLATA al cliente: es una TIR
+//                       sobre los flujos reales, así que sí depende de cuándo
+//                       entró cada peso.
+// Ejemplo de por qué importan las dos: si entra un aporte grande justo antes de
+// una caída, el TWR casi no se mueve y la TIR se hunde. Las dos son correctas.
+function xirr(flujos) {
+  if (flujos.length < 2) return null;
+  const t0 = flujos[0][0];
+  const dias = f => (f - t0) / 86400000;
+  if (dias(flujos[flujos.length - 1][0]) <= 0) return null;
+  const npv = r => flujos.reduce((s, [f, m]) => s + m / Math.pow(1 + r, dias(f) / 365), 0);
+  let lo = -0.9999, hi = 100, vlo = npv(lo);
+  if (vlo * npv(hi) > 0) return null;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2, v = npv(mid);
+    if (Math.abs(v) < 1e-9) return mid;
+    if (vlo * v < 0) hi = mid; else { lo = mid; vlo = v; }
+  }
+  return (lo + hi) / 2;
+}
+
+function tirCartera(s) {
+  if (s.length < 2) return null;
+  const d = f => new Date(f + 'T00:00:00');
+  // el valor inicial es plata puesta (sale del bolsillo), el final es lo que
+  // se recupera, y cada aporte externo es una salida más
+  const flujos = [[d(s[0].fecha), -s[0].valor]];
+  s.slice(1).forEach(f => { if (f.flujo) flujos.push([d(f.fecha), -f.flujo]); });
+  flujos.push([d(s[s.length - 1].fecha), s[s.length - 1].valor]);
+  const r = xirr(flujos);
+  return r == null ? null : r * 100;
 }
 
 // ── Render genérico ────────────────────────────────────────────────────
@@ -356,12 +398,19 @@ let chart;
 function vEvolucion() {
   const s = serieAgregada(), ult = s[s.length - 1];
   const rets = s.map(f => f.retorno).filter(v => v != null);
+  const tir = tirCartera(s);
+  const dias = s.length > 1
+    ? Math.round((new Date(s[s.length - 1].fecha) - new Date(s[0].fecha)) / 86400000) : 0;
+  const caja = ult ? (esUSD() ? num(ult.caja_usd) : num(ult.caja_ars)) : 0;
   kpis('#kpis', [
     { t: `Valor de cartera (${sim()})`, v: ult ? fmt(ult.valor, 0) : '—' },
-    { t: 'Rendimiento del período', v: ult ? pct(ult.acum) : '—', cls: ult ? signo(ult.acum) : '' },
+    { t: `Del cual efectivo (${sim()})`, v: ult ? fmt(caja, 0) : '—',
+      cls: caja < 0 ? 'neg' : '' },
+    { t: `Rentabilidad · ${dias} días`, v: ult ? pct(ult.acum) : '—',
+      cls: ult ? signo(ult.acum) : '' },
+    { t: 'TIR anualizada', v: pct(tir), cls: signo(tir) },
     { t: 'Mejor período', v: rets.length ? pct(Math.max(...rets)) : '—', cls: 'pos' },
     { t: 'Peor período', v: rets.length ? pct(Math.min(...rets)) : '—', cls: 'neg' },
-    { t: 'Cortes', v: String(s.length) },
   ]);
   if (chart) chart.destroy();
   chart = new Chart($('#grafico'), {
@@ -381,6 +430,8 @@ function vEvolucion() {
   tabla('#tPeriodos', [
     { k: 'fecha', t: 'Corte' },
     { k: 'valor', t: `Valor ${sim()}`, n: 1, f: f => fmt(f.valor, 0) },
+    { k: esUSD() ? 'caja_usd' : 'caja_ars', t: `Efectivo ${sim()}`, n: 1, color: 1,
+      f: f => fmt(esUSD() ? f.caja_usd : f.caja_ars, 0) },
     { k: 'flujo', t: `Aportes/retiros ${sim()}`, n: 1, color: 1, f: f => fmt(f.flujo, 0) },
     { k: 'retorno', t: 'Período', n: 1, color: 1, f: f => pct(f.retorno) },
     { k: 'acum', t: 'Acumulado', n: 1, color: 1, f: f => pct(f.acum) },
