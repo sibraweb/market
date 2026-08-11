@@ -356,6 +356,25 @@ function serieAgregada() {
   return filas;
 }
 
+// ── Cuánto es plata del titular y cuánto ganó ──────────────────────────
+// El valor de una cartera son dos cosas mezcladas: lo que el titular puso y lo
+// que rindió. Separarlas es la pregunta que hace cualquier cliente antes que
+// cualquier porcentaje.
+//
+//     capital  = Σ aportes − Σ retiros, desde el primer día
+//     ganancia = valor − capital
+//
+// NO SE PUEDE RECORTAR POR LA VENTANA. Si se mira YTD, la plata que entró en
+// 2024 sigue siendo del titular: descontarla haría aparecer como ganancia un
+// capital que nunca se ganó. Por eso el corte de arriba es la ventana (para que
+// `valor − capital` cierre contra el valor que se está mostrando) pero el de
+// abajo es el inicio de la cuenta, siempre.
+function capitalDelTitular(hasta) {
+  return S.curva
+    .filter(r => r.freq === S.freq && pasa(r, false) && String(r.fecha).slice(0, 10) <= hasta)
+    .reduce((cap, r) => cap + num(esUSD() ? r.flujo_usd : r.flujo_ars), 0);
+}
+
 // ── TIR anualizada de la cartera (MWR) ─────────────────────────────────
 // Los dos números miden cosas distintas y por eso van juntos, como en el
 // homebroker de BCCH:
@@ -436,8 +455,18 @@ function vEvolucion() {
   const dias = s.length > 1
     ? Math.round((new Date(s[s.length - 1].fecha) - new Date(s[0].fecha)) / 86400000) : 0;
   const caja = ult ? num(ult.caja) : 0;
+  const capital = ult ? capitalDelTitular(ult.fecha) : 0;
+  const ganancia = ult ? ult.valor - capital : 0;
+  // El % de la ganancia va sobre el capital PUESTO, no sobre el valor: es
+  // "cuánto le rindió lo que puso". Sin capital positivo no hay contra qué
+  // medirlo (cuenta que ya retiró más de lo que aportó), y ahí no se inventa.
+  const ganPct = capital > 0 ? ganancia / capital * 100 : null;
   kpis('#kpis', [
     { t: `Valor de cartera (${sim()})`, v: ult ? fmt(ult.valor, 0) : '—' },
+    { t: `Capital del titular (${sim()})`, v: ult ? fmt(capital, 0) : '—',
+      cls: capital < 0 ? 'neg' : '' },
+    { t: `Ganancia (${sim()})` + (ganPct != null ? ` · ${pct(ganPct)}` : ''),
+      v: ult ? fmt(ganancia, 0) : '—', cls: signo(ganancia) },
     { t: `Del cual efectivo (${sim()})`, v: ult ? fmt(caja, 0) : '—',
       cls: caja < 0 ? 'neg' : '' },
     { t: `Rentabilidad · ${dias} días`, v: ult ? pct(ult.acum) : '—',
@@ -697,7 +726,16 @@ async function cargar() {
     traer('brokers_posiciones_abiertas'), traer('brokers_resultado_mensual', 'mes'),
     traer('brokers_rentas', 'fecha'), traer('brokers_tenencias'),
   ]);
-  Object.assign(S, { curva, realizado, abiertas, mensual, rentas, tenencias });
+  // LA FILA `Consolidado` DEL MOTOR NO ENTRA. performance.rebuild publica, además
+  // de cada cuenta, un grupo __ALL__ con la firma entera; esta página ya suma las
+  // cuentas por su lado (ver serieAgregada), así que dejarla adentro cuenta todo
+  // dos veces. Sin ningún filtro puesto el valor daba 3.106 millones contra los
+  // 1.555 reales — el doble exacto, y no se nota porque es un número plausible
+  // (visto 2026-08-11). No se ve filtrando por cliente, que es como se mira casi
+  // siempre; aparece en la vista de arranque, sin selección.
+  Object.assign(S, {
+    curva: curva.filter(r => String(r.account) !== '__ALL__'),
+    realizado, abiertas, mensual, rentas, tenencias });
   const faltan = [['curva', curva], ['cerradas', realizado], ['abiertas', abiertas],
                   ['rentas', rentas]].filter(([, v]) => !v.length).map(([n]) => n);
   $('#sello').textContent = faltan.length
