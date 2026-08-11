@@ -314,7 +314,7 @@ function serieAgregada() {
   const por = new Map();
   S.curva.filter(r => r.freq === S.freq && pasa(r, false) && enVentana(r.fecha)).forEach(r => {
     const f = String(r.fecha).slice(0, 10);
-    const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0, caja_ars: 0, caja_usd: 0 };
+    const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0, caja: 0, caja_ars: 0, caja_usd: 0 };
     a.valor += num(esUSD() ? r.valor_usd : r.valor_ars);
     // EL FLUJO EN USD YA VIENE CALCULADO (`flujo_usd`): el motor convierte CADA
     // movimiento al MEP del día en que entró. Dividir el total en pesos por el
@@ -326,8 +326,23 @@ function serieAgregada() {
     a.n += num(r.n_posiciones);
     // El efectivo se muestra aparte del total: es la parte de la cartera que
     // no está invertida (o que está colocada en caución, ver performance.py).
-    a.caja_ars += num(r.caja_ars);
-    a.caja_usd += num(r.caja_usd);
+    //
+    // LAS DOS MONEDAS SE SUMAN SIEMPRE, convertidas al MEP del corte:
+    //     en pesos     caja_ars + caja_usd × MEP
+    //     en dólares   caja_ars / MEP + caja_usd
+    // (regla de Juan, 2026-08-10). El motor publica el saldo NATIVO de cada
+    // cuenta por separado, y mostrar solo la columna de la moneda elegida deja
+    // afuera la otra mitad: Sabadini al 30/04/2026 tenía -4.966.610 pesos y
+    // 6,53 dólares, y la página mostraba -4.966.610 en pesos y 6,53 en dólares
+    // — dos saldos distintos de la misma caja. Acá el MEP del CORTE es el
+    // correcto, al revés que en el flujo: un saldo es una foto a esa fecha,
+    // un aporte pasó en su día y se convierte con el de ese día.
+    const fx = num(r.fx);
+    const c_ars = num(r.caja_ars), c_usd = num(r.caja_usd);
+    a.caja += esUSD() ? c_usd + (fx ? c_ars / fx : 0)
+                      : c_ars + c_usd * fx;
+    a.caja_ars += c_ars;
+    a.caja_usd += c_usd;
     por.set(f, a);
   });
   const filas = [...por.values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -420,7 +435,7 @@ function vEvolucion() {
   const tir = tirCartera(s);
   const dias = s.length > 1
     ? Math.round((new Date(s[s.length - 1].fecha) - new Date(s[0].fecha)) / 86400000) : 0;
-  const caja = ult ? (esUSD() ? num(ult.caja_usd) : num(ult.caja_ars)) : 0;
+  const caja = ult ? num(ult.caja) : 0;
   kpis('#kpis', [
     { t: `Valor de cartera (${sim()})`, v: ult ? fmt(ult.valor, 0) : '—' },
     { t: `Del cual efectivo (${sim()})`, v: ult ? fmt(caja, 0) : '—',
@@ -443,7 +458,7 @@ function vEvolucion() {
     data: { labels: s.map(f => f.fecha), datasets: porValor ? [
       { label: `Valor (${sim()})`, data: s.map(f => f.valor), borderColor: '#E10600',
         backgroundColor: 'rgba(225,6,0,.10)', fill: true, tension: .25, pointRadius: 0 },
-      { label: `Efectivo (${sim()})`, data: s.map(f => esUSD() ? f.caja_usd : f.caja_ars),
+      { label: `Efectivo (${sim()})`, data: s.map(f => f.caja),
         borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,.10)', fill: true,
         tension: .25, pointRadius: 0 },
     ] : [
@@ -463,8 +478,7 @@ function vEvolucion() {
   tabla('#tPeriodos', [
     { k: 'fecha', t: 'Corte' },
     { k: 'valor', t: `Valor ${sim()}`, n: 1, f: f => fmt(f.valor, 0) },
-    { k: esUSD() ? 'caja_usd' : 'caja_ars', t: `Efectivo ${sim()}`, n: 1, color: 1,
-      f: f => fmt(esUSD() ? f.caja_usd : f.caja_ars, 0) },
+    { k: 'caja', t: `Efectivo ${sim()}`, n: 1, color: 1, f: f => fmt(f.caja, 0) },
     { k: 'flujo', t: `Aportes/retiros ${sim()}`, n: 1, color: 1, f: f => fmt(f.flujo, 0) },
     { k: 'retorno', t: 'Período', n: 1, color: 1, f: f => pct(f.retorno) },
     { k: 'acum', t: 'Acumulado', n: 1, color: 1, f: f => pct(f.acum) },
@@ -560,8 +574,7 @@ function vMensual() {
   tabla('#tMensual', [
     { k: 'fecha', t: S.freq === 'W' ? 'Semana' : 'Mes' },
     { k: 'valor', t: `Valor ${sim()}`, n: 1, f: f => fmt(f.valor, 0) },
-    { k: esUSD() ? 'caja_usd' : 'caja_ars', t: `Efectivo ${sim()}`, n: 1, color: 1,
-      f: f => fmt(esUSD() ? f.caja_usd : f.caja_ars, 0) },
+    { k: 'caja', t: `Efectivo ${sim()}`, n: 1, color: 1, f: f => fmt(f.caja, 0) },
     { k: 'flujo', t: `Aportes/retiros ${sim()}`, n: 1, color: 1, f: f => fmt(f.flujo, 0) },
     { k: 'retorno', t: 'Del período', n: 1, color: 1, f: f => pct(f.retorno) },
     { k: 'acum', t: 'TWR acumulado', n: 1, color: 1, f: f => pct(f.acum) },
