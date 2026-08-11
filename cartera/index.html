@@ -315,9 +315,14 @@ function serieAgregada() {
   S.curva.filter(r => r.freq === S.freq && pasa(r, false) && enVentana(r.fecha)).forEach(r => {
     const f = String(r.fecha).slice(0, 10);
     const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0, caja_ars: 0, caja_usd: 0 };
-    const fx = num(r.fx) || 1;
     a.valor += num(esUSD() ? r.valor_usd : r.valor_ars);
-    a.flujo += esUSD() ? num(r.flujo_ars) / fx : num(r.flujo_ars);
+    // EL FLUJO EN USD YA VIENE CALCULADO (`flujo_usd`): el motor convierte CADA
+    // movimiento al MEP del día en que entró. Dividir el total en pesos por el
+    // fx DEL CORTE es otra cosa —y da mal— porque le aplica a un aporte de
+    // diciembre el dólar del cierre del período. Los 23.000 USD del arranque de
+    // Sabadini salían 23.394 en semanal (fx del 06/12) y 20.974 en mensual (fx
+    // del 31/12): el mismo aporte, dos números, ninguno el real (Juan, 2026-08-10).
+    a.flujo += num(esUSD() ? r.flujo_usd : r.flujo_ars);
     a.n += num(r.n_posiciones);
     // El efectivo se muestra aparte del total: es la parte de la cartera que
     // no está invertida (o que está colocada en caución, ver performance.py).
