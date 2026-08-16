@@ -311,10 +311,18 @@ function pasa(r, conTicker = true) {
 // (descontando el flujo, que es capital que entró o salió y no gestión) y se
 // encadena el acumulado.
 function serieAgregada() {
-  const por = new Map();
-  S.curva.filter(r => r.freq === S.freq && pasa(r, false) && enVentana(r.fecha)).forEach(r => {
+  const por = new Map(), cuentas = new Set();
+  // SIN ventana acá: se aplica después, conservando el último corte ANTERIOR
+  // a `desde` como BASE del encadenado (ver abajo el porqué).
+  S.curva.filter(r => r.freq === S.freq && pasa(r, false)).forEach(r => {
     const f = String(r.fecha).slice(0, 10);
-    const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0, caja: 0, caja_ars: 0, caja_usd: 0 };
+    cuentas.add(`${r.broker_code}|${r.account}`);
+    const a = por.get(f) || { fecha: f, valor: 0, flujo: 0, n: 0, caja: 0, caja_ars: 0, caja_usd: 0, tw: null };
+    // El TWR DEL MOTOR viaja con cada corte: está particionado por los días
+    // de cada flujo (twr_partido), cosa que acá no se puede reconstruir desde
+    // cortes agregados. Solo sirve si la selección es UNA cuenta — los TWR de
+    // cuentas distintas no se suman.
+    a.tw = num(esUSD() ? r.twr_acum_usd_pct : r.twr_acum_pct);
     a.valor += num(esUSD() ? r.valor_usd : r.valor_ars);
     // EL FLUJO EN USD YA VIENE CALCULADO (`flujo_usd`): el motor convierte CADA
     // movimiento al MEP del día en que entró. Dividir el total en pesos por el
@@ -345,13 +353,35 @@ function serieAgregada() {
     a.caja_usd += c_usd;
     por.set(f, a);
   });
-  const filas = [...por.values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const todas = [...por.values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  // ── EL PERÍODO BASE NO SE PIERDE ─────────────────────────────────────
+  // El primer corte de la ventana necesita el corte ANTERIOR para medirse:
+  // sin él, su rendimiento desaparece del acumulado. En YTD se perdía ENERO
+  // entero — SIBRATECH daba +6,47% acá contra el +12,83% real del motor
+  // (visto 2026-08-16). La base entra a la serie con retorno nulo, como
+  // primera fila, igual que hace IBKR.
+  const d0 = $('#desde').value, d1 = $('#hasta').value;
+  let i0 = todas.findIndex(f => f.fecha >= d0);
+  if (i0 < 0) return [];
+  if (i0 > 0) i0 -= 1;
+  const filas = todas.slice(i0).filter(f => f.fecha <= d1);
+  // ── UNA cuenta: el TWR es EL DEL MOTOR, re-basado a la ventana ───────
+  // Es el número validado contra la pantalla del broker (IEB dio exacto el
+  // +12,83% el 16/08). El recálculo por suma de valores queda SOLO para
+  // selecciones de varias cuentas, donde es la única forma — y asume el
+  // flujo al final del período, que es aproximado.
+  const conMotor = cuentas.size === 1 && filas.length && filas.every(f => Number.isFinite(f.tw));
   let acum = 1;
   filas.forEach((f, i) => {
-    const prev = i ? filas[i - 1].valor : null;
-    f.retorno = prev ? ((f.valor - f.flujo) / prev - 1) * 100 : null;
-    if (f.retorno != null) acum *= (1 + f.retorno / 100);
-    f.acum = i === 0 ? 0 : (acum - 1) * 100;
+    const prev = i ? filas[i - 1] : null;
+    if (conMotor) {
+      f.retorno = prev ? ((1 + f.tw / 100) / (1 + prev.tw / 100) - 1) * 100 : null;
+      f.acum = ((1 + f.tw / 100) / (1 + filas[0].tw / 100) - 1) * 100;
+    } else {
+      f.retorno = prev ? ((f.valor - f.flujo) / prev.valor - 1) * 100 : null;
+      if (f.retorno != null) acum *= (1 + f.retorno / 100);
+      f.acum = i === 0 ? 0 : (acum - 1) * 100;
+    }
   });
   return filas;
 }
