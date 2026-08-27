@@ -9,7 +9,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-maestros.js?v=20260827"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -611,31 +611,26 @@ const Datos = {
   },
 
   // ── Propuestas (cartera objetivo por comitente) ───────
+  // Desde la BASE (market_propuestas), no más xlsx por Drive: es una base que
+  // no se acumula — Propuestas la vacía y la pisa al publicar (Juan,
+  // 2026-08-27). El detonante del cambio: la carpeta de Drive amaneció
+  // vaciada y el módulo entero se caía por un archivo que no estaba.
   async cargarPropuestas(){
-    const archivos = await Drive.listar(CFG.DRIVE.CARPETA_PROPUESTAS);
-    const xlsx = archivos[0];
-    if(!xlsx) throw new Error("No se encontró archivo de propuestas en Drive");
-    const buf   = await Drive.bajar(xlsx.id);
-    const hojas = Drive.leerXlsx(buf);
-    const hoja  = Object.values(hojas)[0] || [];
-    const header = hoja[0] || [];
-    const iCC     = header.findIndex(h => String(h||"").trim() === "Cuenta Comitente");
-    const iTicker = header.findIndex(h => String(h||"").trim() === "Ticker");
-    const iPct    = header.findIndex(h => String(h||"").trim() === "% Final");
-    if(iCC < 0 || iTicker < 0 || iPct < 0)
-      throw new Error("Formato inesperado en archivo de propuestas (faltan columnas)");
+    const filas = await SibraMaestros.selectAll("market_propuestas", "ccc,ticker");
+    if(!filas.length) throw new Error("No hay propuestas publicadas en la base — generá y publicá desde el módulo Propuestas");
     S.propuestas = {};
-    for(let i = 1; i < hoja.length; i++){
-      const row    = hoja[i];
-      const cc     = String(row[iCC]    || "").trim();
-      const ticker = String(row[iTicker]|| "").trim().toUpperCase();
-      const v      = parseFloat(row[iPct]) || 0;
+    let generado = "";
+    for(const r of filas){
+      const cc     = String(r.ccc || "").trim();
+      const ticker = String(r.ticker || "").trim().toUpperCase();
+      const v      = parseFloat(r.pct_final) || 0;
       const pct    = v > 1 ? v / 100 : v;
       if(!cc || !ticker || pct <= 0) continue;
       if(!S.propuestas[cc]) S.propuestas[cc] = {};
       S.propuestas[cc][ticker] = pct;
+      if(r.generado_at && r.generado_at > generado) generado = r.generado_at;
     }
-    console.log("[Propuestas] CCs:", Object.keys(S.propuestas).length, "— archivo:", xlsx.name);
+    console.log("[Propuestas] CCs:", Object.keys(S.propuestas).length, "— publicadas:", generado.slice(0,10));
     return S.propuestas;
   },
 

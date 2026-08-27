@@ -221,7 +221,12 @@ const SibraMaestros = (() => {
   // ── Escritura: reemplazo total de una tabla ─────────────
   // Los maestros se modifican todo el tiempo (no se acumulan): guardar =
   // borrar todo + insertar lo editado. Chunks de 500 para PostgREST.
-  const PK_COL = { market_papeles: 'simbolo', market_modelos: 'ticker', market_clientes: 'cc', market_senales: 'tipo' };
+  const PK_COL = { market_papeles: 'simbolo', market_modelos: 'ticker', market_clientes: 'cc', market_senales: 'tipo',
+                   // Cartera objetivo por comitente (Juan, 2026-08-27: "es una
+                   // base que no se agrega: siempre se vacía y se pisa"). La
+                   // publica Propuestas y la lee Rotaciones — antes viajaba
+                   // como xlsx por Drive y la carpeta amaneció vaciada.
+                   market_propuestas: 'ticker' };
   async function replaceTable(table, rows) {
     const pk = PK_COL[table];
     if (!pk) throw new Error('Tabla desconocida: ' + table);
