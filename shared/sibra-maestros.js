@@ -238,9 +238,27 @@ const SibraMaestros = (() => {
     return rows.length;
   }
 
+  // ── ¿Se puede OPERAR este cliente? (Juan, 2026-08-27: "no me deje operar
+  // ni rotador ni chicas ni príncipe si no tiene su perfil y la composición
+  // de la cartera permitida"). UNA regla para los tres módulos: perfil
+  // cargado y los plazos sumando algo. Tolera los dos juegos de nombres de
+  // columnas (lp/mp/cp de la base, LP/MP/CP o LARGO/MEDIANO/CORTO de los
+  // mapeos de cada módulo). El alta/corrección se hace en /market/maestros/.
+  function clienteOperable(c) {
+    if (!c) return { ok: false, motivo: 'no está en el maestro de clientes' };
+    if (!String(c.perfil || '').trim())
+      return { ok: false, motivo: 'sin PERFIL cargado — completalo en Maestros' };
+    const claves = ['LP','MP','CP','CASH','lp','mp','cp','cash','LARGO','MEDIANO','CORTO','largo','mediano','corto'];
+    const suma = claves.reduce((s, k) => s + (Number(c[k]) || 0), 0);
+    if (suma <= 0)
+      return { ok: false, motivo: 'sin composición de cartera (LP/MP/CP/CASH) — cargala en Maestros' };
+    return { ok: true, motivo: '' };
+  }
+
   return {
     SUPABASE_URL, sessionEmail, login, logout, ensureLogin, rest, selectAll,
     restPublic, selectAllPublic,
     papeles, modelos, clientes, papelesDict, modelosPorPerfil, replaceTable, invalidate,
+    clienteOperable,
   };
 })();

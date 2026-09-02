@@ -9,7 +9,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-maestros.js?v=20260828"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -606,7 +606,9 @@ const Datos = {
         cuit:    c.cuit,
         alyc:    c.alyc,
         monto:   Number(c.monto)||0,
-        perfil:  c.perfil || "AGRESIVO",
+        // SIN default: el candado operativo (clienteOperable) tiene que VER
+        // que falta el perfil — con || "AGRESIVO" cualquiera pasaba.
+        perfil:  c.perfil || "",
         LP:      Number(c.lp)||0,
         MP:      Number(c.mp)||0,
         CP:      Number(c.cp)||0,
@@ -851,6 +853,17 @@ const Calc = {
     };
   },
 
+  // ── DEFAULT DEL "% CAUCION A TOMAR" (Juan, 2026-08-27): el porcentaje que
+  // YA representa la caucion tomada -- arrancar NEUTRO (deltaCaucion 0): la
+  // rotacion no toma ni devuelve caucion salvo que el operador mueva el %.
+  // El % acordado del maestro sigue visible en la ficha del cliente; esto
+  // solo cambia el punto de partida del ajuste manual.
+  palancaActual(ten, aARS, aUSD){
+    if(!ten) return 0;
+    const b=Calc.base(ten, aARS||0, aUSD||0, 0);
+    return b.totalAjustado>0?Math.max(0, Math.round((b.caucionReal/b.totalAjustado)*10000)/10000):0;
+  },
+
   // Sin cartera modelo, la venta es una DECISION: cada posicion se puede
   // vender en el % que el operador elija. Default 0 (no se vende nada
   // salvo que se pida), al reves de rotaciones donde el modelo mandaba.
@@ -968,7 +981,8 @@ const Senales = {
     try{
       const rows = await SibraMaestros.selectAll("market_senales");
       S.senales.venta  = rows.filter(r=>r.tipo==="VENTA")
-        .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0}));
+        .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0,
+                   pctMin:(r.pct_min===null||r.pct_min===undefined)?undefined:Number(r.pct_min)}));
       S.senales.compra = rows.filter(r=>r.tipo==="COMPRA")
         .map(r=>({ticker:String(r.ticker).trim().toUpperCase(), valor:Number(r.valor)||0,
                    pctEfvo:(r.pct_efvo===null||r.pct_efvo===undefined)?undefined:Number(r.pct_efvo)}));
@@ -993,14 +1007,34 @@ const Senales = {
   // operador la carga a mano si hace falta, igual que cualquier ticker
   // manual) en vez de dejar una fila con cantidad 0 silenciosa.
   aplicar(ten){
+    // La base va PRIMERO: los límites de las señales se miden sobre la
+    // CARTERA BRUTA (totalCartera = títulos + cash + caución).
+    const { base, deltaCaucion, totalCartera } = Calc.base(ten, S.aporteARS, S.aporteUSD, Calc.palancaActual(ten, S.aporteARS, S.aporteUSD));
+
+    // ── LOS LÍMITES SON DE LA SUGERENCIA, NO DEL CÁLCULO (Juan, 2026-08-27:
+    // "estas restricciones son para la sugerencia; luego en cada cliente se
+    // puede modificar a mano como lo hacíamos"). El piso de venta (pct_min)
+    // recorta el % PRELLENADO: vender 90% de GOOGL con mínimo 5% de la bruta
+    // prellena el % que deja a GOOGL justo en el piso. Después, lo que el
+    // operador tipee a mano MANDA, sin re-recortes escondidos.
     S.pctV = {};
-    S.senales.venta.forEach(s=>{ S.pctV[s.ticker]=s.valor; });
+    S.senales.venta.forEach(s=>{
+      let pct = s.valor;
+      if(s.pctMin!==undefined && s.pctMin>0 && totalCartera>0){
+        const pos = ten.posiciones.find(p=>p.ticker===s.ticker);
+        const pu = pos ? (Precios.get(s.ticker)||pos.pu) : 0;
+        if(pos && pu>0 && pos.cantidad>0){
+          const maxVenta = Math.max(0, pos.cantidad - (s.pctMin*totalCartera)/pu);
+          pct = Math.min(pct, maxVenta/pos.cantidad);
+        }
+      }
+      S.pctV[s.ticker]=Math.max(0, Math.round(pct*10000)/10000);
+    });
 
     const ventasPreview = Calc.ventas(ten, S.pctV, S.comV, S.gasV);
     const postVenta = {};
     ventasPreview.forEach(v=>{ postVenta[v.ticker]=v.cantActual-v.cantOp; });
 
-    const { base, deltaCaucion } = Calc.base(ten, S.aporteARS, S.aporteUSD, S.clienteActual?.palanca||0);
     const disponible = Calc.disponible(ventasPreview, ten, S.aporteARS, S.aporteUSD, deltaCaucion);
     const factorComC = 1+S.comC+S.gasC;
 
@@ -1010,7 +1044,9 @@ const Senales = {
       const pos = ten.posiciones.find(p=>p.ticker===s.ticker);
       const cantidadPost = postVenta[s.ticker]!==undefined ? postVenta[s.ticker] : (pos?pos.cantidad:0);
       const valorActual = cantidadPost*pu;
-      const valorTope = base*s.valor;
+      // Sobre la BRUTA (Juan, 2026-08-27: "máximo en cartera bruta") — antes
+      // usaba `base` (neta ajustada), que difiere en cuentas apalancadas.
+      const valorTope = totalCartera*s.valor;
       let faltante = Math.max(0, valorTope-valorActual);
       if(s.pctEfvo!=null && disponible>0){
         const maxGasto = s.pctEfvo*disponible;          // incluye comisión
@@ -1056,12 +1092,15 @@ const Senales = {
             onchange="Senales.setCampo('${tipo}',${i},'valor',Math.max(0,Number(this.value)/100))"/></td>
       ${esCompra?`<td style="width:110px"><input class="input-field pct-input" type="number" min="0" step="1"
             placeholder="sin tope" value="${s.pctEfvo!=null?Math.round(s.pctEfvo*100):""}"
-            onchange="Senales.setCampo('compra',${i},'pctEfvo',this.value===''?undefined:Math.max(0,Number(this.value)/100))"/></td>`:""}
+            onchange="Senales.setCampo('compra',${i},'pctEfvo',this.value===''?undefined:Math.max(0,Number(this.value)/100))"/></td>`
+        :`<td style="width:110px"><input class="input-field pct-input" type="number" min="0" step="1"
+            placeholder="sin piso" value="${s.pctMin!=null?Math.round(s.pctMin*100):""}"
+            onchange="Senales.setCampo('venta',${i},'pctMin',this.value===''?undefined:Math.max(0,Number(this.value)/100))"/></td>`}
       <td style="width:40px"><button class="btn btn-ghost" style="padding:4px 8px" onclick="Senales.borrarFila('${tipo}',${i})">✕</button></td>
     </tr>`).join("");
-    const ncols = esCompra?4:3;
+    const ncols = 4;
     return `<div class="tbl-wrap" style="margin-bottom:10px">
-      <table><thead><tr><th style="text-align:left">Ticker</th><th>${tipo==="venta"?"% a vender":"% tope de cartera"}</th>${esCompra?`<th title="Tope opcional: no gastar en este ticker más que este % del disponible (ventas + efectivo de cuenta + caución teórica), aunque el % tope de cartera de al lado pida más. Vacío = sin tope de efectivo.">% máx. efectivo</th>`:""}<th></th></tr></thead>
+      <table><thead><tr><th style="text-align:left">Ticker</th><th>${tipo==="venta"?"% a vender":"% tope de cartera"}</th>${esCompra?`<th title="Tope opcional: no gastar en este ticker más que este % del disponible (ventas + efectivo de cuenta + caución teórica), aunque el % tope de cartera de al lado pida más. Vacío = sin tope de efectivo.">% máx. efectivo</th>`:`<th title="Piso opcional: MÍNIMO del título a conservar como % de la cartera BRUTA. Si el % a vender lo dejaría por debajo, se vende solo hasta el piso — prima el porcentaje. Vacío = sin piso.">% mín. cartera</th>`}<th></th></tr></thead>
       <tbody>${rows||`<tr><td colspan="${ncols}" style="text-align:center;color:var(--text3);padding:16px">Sin señales de ${tipo}</td></tr>`}</tbody></table>
     </div>
     <button class="btn btn-ghost" onclick="Senales.agregarFila('${tipo}')">+ Agregar ${tipo==="venta"?"venta":"compra"}</button>`;
@@ -1086,9 +1125,10 @@ const Senales = {
     const b = Senales.borrador||S.senales;
     const totalFilas = b.venta.length + b.compra.length;
     const rows = [
-      ...b.venta.filter(s=>s.ticker).map(s=>({tipo:"VENTA", ticker:s.ticker, valor:s.valor, pct_efvo:null})),
+      ...b.venta.filter(s=>s.ticker).map(s=>({tipo:"VENTA", ticker:s.ticker, valor:s.valor, pct_efvo:null,
+          pct_min:(s.pctMin===undefined||s.pctMin===null)?null:Number(s.pctMin)})),
       ...b.compra.filter(s=>s.ticker).map(s=>({tipo:"COMPRA", ticker:s.ticker, valor:s.valor,
-          pct_efvo:(s.pctEfvo===undefined||s.pctEfvo===null)?null:Number(s.pctEfvo)})),
+          pct_efvo:(s.pctEfvo===undefined||s.pctEfvo===null)?null:Number(s.pctEfvo), pct_min:null})),
     ];
     // Si hay filas cargadas pero ninguna tiene ticker (quedó vacío o sin
     // tipear), avisar CLARO antes de guardar 0 -- si no, "guardar" borra
@@ -1205,6 +1245,26 @@ const App = {
   },
 
   async selCliente(cliente){
+    // ── CANDADO OPERATIVO (Juan, 2026-08-27): sin perfil y sin composición
+    // de cartera no se opera. El criterio vive en SibraMaestros
+    // .clienteOperable (compartido con los otros módulos); el alta se hace
+    // en /market/maestros/. La vista refleja el bloqueo en el lugar.
+    const _op = SibraMaestros.clienteOperable(cliente);
+    if(!_op.ok){
+      S.clienteActual=cliente; S.alycSel=cliente.alyc; S.tenencia=null;
+      UI.setTab("inicial");
+      $("pane-inicial").innerHTML=`<div class="card" style="margin:20px auto;max-width:560px;padding:24px;text-align:center">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">${cliente.cliente||''} · ${cliente.cc} · ${cliente.alyc}</div>
+        <div style="color:var(--red-light);font-size:12px;font-weight:700;margin-bottom:6px">⛔ No se puede operar este cliente</div>
+        <div style="color:var(--text3);font-size:12px;margin-bottom:14px">${_op.motivo}</div>
+        <div style="display:flex;gap:10px;justify-content:center">
+          <a class="btn btn-ghost" href="../maestros/" style="text-decoration:none">Abrir Maestros</a>
+          <button class="btn btn-red" onclick="App.pasarSinOperar()">Pasar al siguiente →</button>
+        </div>
+      </div>`;
+      $("pane-objetivo").innerHTML="";
+      return;
+    }
     S.clienteActual=cliente; S.alycSel=cliente.alyc;
     S.aporteARS=0; S.aporteUSD=0; S.palancaAjuste=null;
     S.pctV={}; S.pctC={}; S.tenencia=null;
@@ -1229,7 +1289,20 @@ const App = {
       UI.setTab("inicial"); App.render();
       App.avisarDiscrepancia(ten, cliente);
     }catch(e){
-      hideLoad(); toast("Error tenencia: "+e.message,"error"); console.error(e);
+      hideLoad(); console.error(e);
+      // LA VISTA SIEMPRE REFLEJA EL CLIENTE SELECCIONADO (Juan, 2026-08-27:
+      // "avisa el mensaje emergente pero no actualiza la consulta con ese
+      // filtro"). Antes, si el cliente nuevo no tenia tenencia, el toast
+      // avisaba pero quedaban las TABLAS DEL CLIENTE ANTERIOR con el nombre
+      // del nuevo: paneles limpios + aviso en el lugar + boton para seguir.
+      toast("Error tenencia: "+e.message,"error");
+      UI.setTab("inicial");
+      $("pane-inicial").innerHTML=`<div class="card" style="margin:20px auto;max-width:520px;padding:24px;text-align:center">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">${cliente.cliente} · ${cliente.cc} · ${cliente.alyc}</div>
+        <div style="color:var(--text3);font-size:12px;margin-bottom:14px">${e.message}</div>
+        <button class="btn btn-red" onclick="App.pasarSinOperar()">Pasar al siguiente →</button>
+      </div>`;
+      $("pane-objetivo").innerHTML="";
     }
   },
 
@@ -1299,11 +1372,11 @@ const App = {
   quitarTicker(idx){ S.manual.splice(idx,1); App.render(); },
 
   setPalanca(v){ S.palancaAjuste=Math.max(0,v); App.render(); },
-  adjPalanca(d){ const cur=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual?.palanca||0); S.palancaAjuste=Math.max(0,Math.round((cur+d)*100)/100); App.render(); },
+  adjPalanca(d){ const cur=S.palancaAjuste!==null?S.palancaAjuste:Calc.palancaActual(S.tenencia,S.aporteARS,S.aporteUSD); S.palancaAjuste=Math.max(0,Math.round((cur+d)*100)/100); App.render(); },
 
   render(){
     if(!S.clienteActual||!S.tenencia) return;
-    const palanca=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual.palanca||0);
+    const palanca=S.palancaAjuste!==null?S.palancaAjuste:Calc.palancaActual(S.tenencia,S.aporteARS,S.aporteUSD);
     const {totalCartera,totalAjustado,base,caucionReal,caucionTeorica,deltaCaucion}=Calc.base(S.tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(S.tenencia,S.pctV,S.comV,S.gasV);
     const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
@@ -1363,8 +1436,8 @@ const App = {
       toast(`Bloqueado: la valuación con data912 difiere ${pct(tenencia.discrepanciaPct)} de la del broker (máximo ${pct(CFG.DISCREPANCIA_MAX_PCT)}). Puede haber un precio mal escalado -- revisá antes de operar.`,"error");
       return;
     }
-    const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
-    const {base,deltaCaucion}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
+    const palanca=S.palancaAjuste!==null?S.palancaAjuste:Calc.palancaActual(tenencia,S.aporteARS,S.aporteUSD);
+    const {base,deltaCaucion,totalCartera}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,S.pctV,S.comV,S.gasV);
     const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
     const compras=Calc.compras(tenencia,ventas,S.pctC,S.comC,S.gasC);

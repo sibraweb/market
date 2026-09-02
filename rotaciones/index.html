@@ -9,7 +9,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260827"></script>
+<script src="../shared/sibra-maestros.js?v=20260828"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -579,7 +579,9 @@ const Datos = {
         cuit:    c.cuit,
         alyc:    c.alyc,
         monto:   Number(c.monto)||0,
-        perfil:  c.perfil || "AGRESIVO",
+        // SIN default: el candado operativo (clienteOperable) tiene que VER
+        // que falta el perfil — con || "AGRESIVO" cualquiera pasaba.
+        perfil:  c.perfil || "",
         LP:      Number(c.lp)||0,
         MP:      Number(c.mp)||0,
         CP:      Number(c.cp)||0,
@@ -809,6 +811,17 @@ const Calc = {
     };
   },
 
+  // ── DEFAULT DEL "% CAUCION A TOMAR" (Juan, 2026-08-27): el porcentaje que
+  // YA representa la caucion tomada -- arrancar NEUTRO (deltaCaucion 0): la
+  // rotacion no toma ni devuelve caucion salvo que el operador mueva el %.
+  // El % acordado del maestro sigue visible en la ficha del cliente; esto
+  // solo cambia el punto de partida del ajuste manual.
+  palancaActual(ten, aARS, aUSD){
+    if(!ten) return 0;
+    const b=Calc.base(ten, aARS||0, aUSD||0, 0);
+    return b.totalAjustado>0?Math.max(0, Math.round((b.caucionReal/b.totalAjustado)*10000)/10000):0;
+  },
+
   ventas(ten, obj, base, pctV, comV, gasV){
     return ten.posiciones.map(pos=>{
       const t=pos.ticker;
@@ -956,6 +969,26 @@ const App = {
   },
 
   async selCliente(cliente){
+    // ── CANDADO OPERATIVO (Juan, 2026-08-27): sin perfil y sin composición
+    // de cartera no se opera. El criterio vive en SibraMaestros
+    // .clienteOperable (compartido con los otros módulos); el alta se hace
+    // en /market/maestros/. La vista refleja el bloqueo en el lugar.
+    const _op = SibraMaestros.clienteOperable(cliente);
+    if(!_op.ok){
+      S.clienteActual=cliente; S.alycSel=cliente.alyc; S.tenencia=null;
+      UI.setTab("inicial");
+      $("pane-inicial").innerHTML=`<div class="card" style="margin:20px auto;max-width:560px;padding:24px;text-align:center">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">${cliente.cliente||''} · ${cliente.cc} · ${cliente.alyc}</div>
+        <div style="color:var(--red-light);font-size:12px;font-weight:700;margin-bottom:6px">⛔ No se puede operar este cliente</div>
+        <div style="color:var(--text3);font-size:12px;margin-bottom:14px">${_op.motivo}</div>
+        <div style="display:flex;gap:10px;justify-content:center">
+          <a class="btn btn-ghost" href="../maestros/" style="text-decoration:none">Abrir Maestros</a>
+          <button class="btn btn-red" onclick="App.pasarSinOperar()">Pasar al siguiente →</button>
+        </div>
+      </div>`;
+      $("pane-objetivo").innerHTML="";
+      return;
+    }
     S.clienteActual=cliente; S.alycSel=cliente.alyc;
     S.aporteARS=0; S.aporteUSD=0; S.palancaAjuste=null;
     S.pctV={}; S.pctC={}; S.tenencia=null;
@@ -978,7 +1011,20 @@ const App = {
       UI.setTab("inicial"); App.render();
       App.avisarDiscrepancia(ten, cliente);
     }catch(e){
-      hideLoad(); toast("Error tenencia: "+e.message,"error"); console.error(e);
+      hideLoad(); console.error(e);
+      // LA VISTA SIEMPRE REFLEJA EL CLIENTE SELECCIONADO (Juan, 2026-08-27:
+      // "avisa el mensaje emergente pero no actualiza la consulta con ese
+      // filtro"). Antes, si el cliente nuevo no tenia tenencia, el toast
+      // avisaba pero quedaban las TABLAS DEL CLIENTE ANTERIOR con el nombre
+      // del nuevo: paneles limpios + aviso en el lugar + boton para seguir.
+      toast("Error tenencia: "+e.message,"error");
+      UI.setTab("inicial");
+      $("pane-inicial").innerHTML=`<div class="card" style="margin:20px auto;max-width:520px;padding:24px;text-align:center">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">${cliente.cliente} · ${cliente.cc} · ${cliente.alyc}</div>
+        <div style="color:var(--text3);font-size:12px;margin-bottom:14px">${e.message}</div>
+        <button class="btn btn-red" onclick="App.pasarSinOperar()">Pasar al siguiente →</button>
+      </div>`;
+      $("pane-objetivo").innerHTML="";
     }
   },
 
@@ -1003,11 +1049,11 @@ const App = {
   // arreglar el saldo (sube/baja el disponible vía deltaCaucion). setPalanca
   // fija el valor tipeado; adjPalanca lo nudge con los botones −5/+1.
   setPalanca(v){ S.palancaAjuste=Math.max(0,v); App.render(); },
-  adjPalanca(d){ const cur=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual?.palanca||0); S.palancaAjuste=Math.max(0,Math.round((cur+d)*100)/100); App.render(); },
+  adjPalanca(d){ const cur=S.palancaAjuste!==null?S.palancaAjuste:Calc.palancaActual(S.tenencia,S.aporteARS,S.aporteUSD); S.palancaAjuste=Math.max(0,Math.round((cur+d)*100)/100); App.render(); },
 
   render(){
     if(!S.clienteActual||!S.tenencia) return;
-    const palanca=S.palancaAjuste!==null?S.palancaAjuste:(S.clienteActual.palanca||0);
+    const palanca=S.palancaAjuste!==null?S.palancaAjuste:Calc.palancaActual(S.tenencia,S.aporteARS,S.aporteUSD);
     const {totalCartera,totalAjustado,base,caucionReal,caucionTeorica,deltaCaucion}=Calc.base(S.tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(S.tenencia,S.objetivo,base,S.pctV,S.comV,S.gasV);
     const disp=Calc.disponible(ventas,S.tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);
@@ -1080,7 +1126,7 @@ const App = {
       toast("Tu sesión de Google venció (dura ~1h). Reconectate y volvé a guardar.","error");
       return;
     }
-    const palanca=S.palancaAjuste!==null?S.palancaAjuste:(cl.palanca||0);
+    const palanca=S.palancaAjuste!==null?S.palancaAjuste:Calc.palancaActual(tenencia,S.aporteARS,S.aporteUSD);
     const {base,deltaCaucion}=Calc.base(tenencia,S.aporteARS,S.aporteUSD,palanca);
     const ventas=Calc.ventas(tenencia,objetivo,base,S.pctV,S.comV,S.gasV);
     const disp=Calc.disponible(ventas,tenencia,S.aporteARS,S.aporteUSD,deltaCaucion);

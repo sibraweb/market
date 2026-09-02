@@ -11,7 +11,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-maestros.js?v=20260828"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <style>
@@ -851,14 +851,11 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
   <div class="logo">SIBRA<span> · Rotador de Carteras</span></div>
   <a href="../" class="back-btn">← Market Suite</a>
   <div class="header-sep"></div>
-  <div class="drive-status">
-    <div class="drive-dot" id="driveDot"></div>
-    <span id="driveLabel">Sin conectar</span>
-  </div>
-  <button class="btn-drive" id="btnDriveAuth" onclick="App.driveAuth()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 18l5-8.5 5 8.5M3 18l4-7 4 7M13 18l4-7 4 7"/></svg>
-    Conectar Drive
-  </button>
+  <!-- Google/Drive salió del header (Juan, 2026-08-27): la carga lee de la
+       base, no hace falta conectar nada. El OAuth quedó solo para las
+       utilidades opcionales de la pestaña Operaciones (subir/descargar). -->
+  <span id="driveDot" style="display:none"></span><span id="driveLabel" style="display:none"></span>
+  <button id="btnDriveAuth" style="display:none" onclick="App.driveAuth()"></button>
 </header>
 
 <!-- NAV -->
@@ -875,44 +872,12 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
 <div class="panel active" id="panel-fuentes">
   <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
 
-    <!-- Columna izquierda: config Drive -->
+    <!-- Columna izquierda: MEP (el bloque de credenciales OAuth se quitó —
+         la carga lee de la base, no de Drive; Juan 2026-08-27). Los ids que
+         el JS de Drive todavía toca quedan ocultos para no romper nada. -->
     <div style="flex:0 0 340px;">
-      <div class="drive-config">
-        <h2>Conexión Google Drive</h2>
-        <p>Configurá tus credenciales OAuth para leer los archivos directamente desde Drive y escribir resultados sin salir de la app.</p>
-
-        <div class="config-section">
-          <label>Client ID (OAuth 2.0)</label>
-          <input type="text" id="cfgClientId" value="891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com" />
-          <p class="hint">Crealo en <strong>Google Cloud Console → APIs → Credenciales → OAuth 2.0</strong>. Tipo: Aplicación web. URI de redirección autorizado: el origen de esta página.</p>
-        </div>
-
-        <div class="config-section">
-          <label>Scopes requeridos</label>
-          <div style="font-family:monospace; font-size:11px; color:var(--text2); line-height:2;">
-            https://www.googleapis.com/auth/drive.readonly<br>
-            https://www.googleapis.com/auth/drive.file
-          </div>
-          <p class="hint">readonly para leer, drive.file para escribir solo archivos creados por la app.</p>
-        </div>
-
-        <div style="display:flex; gap:10px; margin-top:6px;">
-          <button class="btn-primary" onclick="App.driveAuth()">
-            <span>Autorizar con Google</span>
-          </button>
-          <button class="btn-secondary" onclick="App.driveRevoke()">Revocar</button>
-        </div>
-
-        <div id="driveTokenInfo" style="margin-top:14px; display:none;">
-          <div class="flex-center">
-            <div class="drive-dot connected"></div>
-            <span style="font-size:12px; color:var(--green);">Conectado</span>
-          </div>
-          <div style="font-size:11px; color:var(--text3); margin-top:4px;">
-            Token válido hasta: <span id="tokenExpiry">—</span>
-          </div>
-        </div>
-      </div>
+      <input type="hidden" id="cfgClientId" value="891275909999-25to444ggoo9k1inji4lqbaq1h99ij41.apps.googleusercontent.com" />
+      <div id="driveTokenInfo" style="display:none;"><span id="tokenExpiry"></span></div>
 
       <!-- MEP en vivo -->
       <div class="drive-config mt-20" style="background:var(--bg3);">
@@ -932,43 +897,24 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
     <div style="flex:1; min-width:500px;">
 
       <div class="section-head">
-        <h3>Fuentes de datos</h3>
-        <button class="btn-primary" id="btnCargarDrive" onclick="App.loadData(true)">
-          ↻ Actualizar desde la base
-        </button>
+        <h3>Cartera actual</h3>
       </div>
 
-      <!-- Tenencias + cauciones vienen de la base sibra-brokers (ya no de Excel). -->
+      <!-- Todo se lee de la base: un solo botón (Juan, 2026-08-27). Los ids
+           de estado que el JS todavía escribe quedan ocultos. -->
       <div style="background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:12px;">
-        <div class="block-title" style="margin-bottom:8px;">Base sibra-brokers</div>
-        <div style="font-size:12px; color:var(--text3); margin-bottom:14px;">
-          Tenencias, efectivo y cauciones de BCCH / IEB / ADCAP se sincronizan solos y se leen de la base. No hace falta cargar Excel.
+        <div style="font-size:12px; color:var(--text3); line-height:1.7;">
+          Tenencias, efectivo, cauciones y precios de BCCH / IEB / ADCAP se
+          sincronizan solos y se leen de la base. Un botón trae todo.
+          <a href="../maestros/" style="color:var(--red)">Editar maestros</a>.
         </div>
-
-        <div class="source-card" id="sc-allocation">
-          <div class="sc-title">Maestros · clasificación PAPELES + modelo + clientes</div>
-          <div class="sc-file" id="sc-allocation-name">Base Supabase (market_papeles / market_modelos / market_clientes)</div>
-          <div class="sc-status idle" id="sc-allocation-status"><span>●</span> Sin cargar</div>
-          <div style="display:flex; gap:6px; margin-top:10px;">
-            <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.cargarMaestros(true)">↻ Recargar de la base</button>
-            <a class="btn-secondary" style="font-size:11px; padding:4px 10px; text-decoration:none;" href="../maestros/">✎ Editar maestros</a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Precios -->
-      <div class="source-card" id="sc-precios" style="margin-bottom:12px;">
-        <div class="sc-title">Precios Data912</div>
-        <div class="sc-file" id="sc-precios-name">API en vivo · 7 paneles</div>
-        <div class="sc-status idle" id="sc-precios-status"><span>●</span> Sin cargar</div>
-        <div style="display:flex; gap:6px; margin-top:10px; align-items:center;">
-          <button class="btn-secondary" style="font-size:11px; padding:4px 10px;" onclick="App.fetchPrices()">↓ Descargar precios</button>
-          <span style="font-size:11px; color:var(--text3);">MEP: <span id="mepVal2" style="color:var(--amber);">—</span></span>
-        </div>
+        <span id="sc-allocation-name" style="display:none"></span><span id="sc-allocation-status" style="display:none"></span>
+        <span id="sc-precios-name" style="display:none"></span><span id="sc-precios-status" style="display:none"></span>
+        <span id="mepVal2" style="display:none"></span>
       </div>
 
       <!-- Cargar/actualizar la cartera desde la base -->
-      <button class="btn-primary w-full" style="padding:11px; font-size:13px; justify-content:center;" onclick="App.loadData(true)">
+      <button class="btn-primary w-full" id="btnCargarDrive" style="padding:13px; font-size:14px; justify-content:center;" onclick="App.loadData(true)">
         ↻ Cargar cartera desde la base
       </button>
 
@@ -2954,6 +2900,10 @@ function clearAllocFilters() {
   actualizarAllocations();
 }
 
+function toggleAllocDet(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
 function setAllocView(view) {
   S.allocView = view;
   document.querySelectorAll('.alloc-subtab').forEach(t =>
@@ -3018,9 +2968,11 @@ function actualizarAllocations() {
     const tipo = clasificarTicker(p.ticker, S.allocation[p.ticker]);
     const val  = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
     if (!cuentasMap[key])
-      cuentasMap[key] = { comitente: p.comitente, alyc: p.alyc, cliente: cuentaInfo[key]?.cliente || p.comitente, valor: 0, tickers: new Set() };
+      cuentasMap[key] = { comitente: p.comitente, alyc: p.alyc, cliente: cuentaInfo[key]?.cliente || p.comitente, valor: 0, tickers: new Set(), filas: [] };
     cuentasMap[key].valor += val;
     cuentasMap[key].tickers.add(p.ticker);
+    // detalle para el drill-down (click en la fila): los titulos de la cuenta
+    cuentasMap[key].filas.push({ ticker: p.ticker, tipo, cant: p.tenencia, valor: val });
   });
   const cuentasOrdenadas = Object.values(cuentasMap).sort((a, b) => b.valor - a.valor);
   const totalFiltro = cuentasOrdenadas.reduce((s, c) => s + c.valor, 0);
@@ -3030,13 +2982,25 @@ function actualizarAllocations() {
         const info = cuentaInfo[`${c.alyc}|${c.comitente}`] || { netaCliente: 0, brutaCliente: 0 };
         const pctNeto  = info.netaCliente  > 0 ? c.valor / info.netaCliente  * 100 : 0;
         const pctBruto = info.brutaCliente > 0 ? c.valor / info.brutaCliente * 100 : 0;
-        return `<tr>
+        // DRILL-DOWN (Juan, 2026-08-28): click en la cuenta -> sus titulos,
+        // con % neto y bruto SOBRE ESA CUENTA, respetando el filtro de arriba.
+        const detId = 'allocDetC-' + (c.alyc + '-' + c.comitente).replace(/[^\w-]/g, '_');
+        const filasDet = c.filas.slice().sort((a, b) => b.valor - a.valor).map(fd => {
+          const pn = info.netaCliente  > 0 ? fd.valor / info.netaCliente  * 100 : 0;
+          const pb = info.brutaCliente > 0 ? fd.valor / info.brutaCliente * 100 : 0;
+          return `<tr><td>${fd.ticker}</td><td class="td-num">${fmt(fd.cant)}</td><td class="td-num">$${fmt(fd.valor)}</td><td class="td-num">${fmtPct(pn)}</td><td class="td-num" style="color:var(--text2)">${fmtPct(pb)}</td></tr>`;
+        }).join('');
+        return `<tr style="cursor:pointer" onclick="App.toggleAllocDet('${detId}')" title="Click: ver los titulos de esta cuenta">
           <td><strong>${c.cliente}</strong><br><span style="font-size:10px;color:var(--text3)">${c.comitente} · ${c.alyc}</span></td>
           <td class="td-num"><strong>${fmtPct(pctNeto)}</strong></td>
           <td class="td-num" style="color:var(--text2)"><strong>${fmtPct(pctBruto)}</strong></td>
           <td class="td-num">$${fmt(c.valor)}</td>
-          <td class="td-num">${c.tickers.size}</td>
-        </tr>`;
+          <td class="td-num">${c.tickers.size} ▾</td>
+        </tr>
+        <tr id="${detId}" style="display:none;background:var(--bg3)"><td colspan="5" style="padding:8px 16px 12px">
+          <table style="width:100%;font-size:11px"><thead><tr><th style="text-align:left">Título</th><th style="text-align:right">Cantidad</th><th style="text-align:right">Valor $</th><th style="text-align:right">% neto cuenta</th><th style="text-align:right">% bruto cuenta</th></tr></thead>
+          <tbody>${filasDet}</tbody></table>
+        </td></tr>`;
       }).join('')
     : `<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text3)">Sin datos para este filtro</td></tr>`;
 
@@ -3047,9 +3011,11 @@ function actualizarAllocations() {
     const tipo  = clasificarTicker(p.ticker, alloc);
     const val   = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
     if (!tickersMap[p.ticker])
-      tickersMap[p.ticker] = { ticker: p.ticker, tipo, alloc, valor: 0, cuentas: new Set() };
+      tickersMap[p.ticker] = { ticker: p.ticker, tipo, alloc, valor: 0, cuentas: new Set(), filas: [] };
     tickersMap[p.ticker].valor += val;
     tickersMap[p.ticker].cuentas.add(p.comitente);
+    // detalle para el drill-down: que cuentas tienen el titulo y cuanto
+    tickersMap[p.ticker].filas.push({ key: `${p.alyc}|${p.comitente}`, alyc: p.alyc, comitente: p.comitente, cant: p.tenencia, valor: val });
   });
   const tickersOrdenados = Object.values(tickersMap).sort((a, b) => b.valor - a.valor);
 
@@ -3057,7 +3023,17 @@ function actualizarAllocations() {
     ? tickersOrdenados.map(t => {
         const pctNeto  = totalNetaGlobal  > 0 ? t.valor / totalNetaGlobal  * 100 : 0;
         const pctBruto = totalBrutaGlobal > 0 ? t.valor / totalBrutaGlobal * 100 : 0;
-        return `<tr>
+        // DRILL-DOWN (Juan, 2026-08-28): click en el titulo -> las cuentas
+        // que lo tienen, con lo que representa en la neta y la bruta DE CADA
+        // CUENTA, respetando el filtro de arriba.
+        const detId = 'allocDetT-' + t.ticker.replace(/[^\w-]/g, '_');
+        const filasDet = t.filas.slice().sort((a, b) => b.valor - a.valor).map(fd => {
+          const info2 = cuentaInfo[fd.key] || { cliente: fd.comitente, netaCliente: 0, brutaCliente: 0 };
+          const pn = info2.netaCliente  > 0 ? fd.valor / info2.netaCliente  * 100 : 0;
+          const pb = info2.brutaCliente > 0 ? fd.valor / info2.brutaCliente * 100 : 0;
+          return `<tr><td>${info2.cliente} <span style="color:var(--text3);font-size:10px">${fd.comitente} · ${fd.alyc}</span></td><td class="td-num">${fmt(fd.cant)}</td><td class="td-num">$${fmt(fd.valor)}</td><td class="td-num">${fmtPct(pn)}</td><td class="td-num" style="color:var(--text2)">${fmtPct(pb)}</td></tr>`;
+        }).join('');
+        return `<tr style="cursor:pointer" onclick="App.toggleAllocDet('${detId}')" title="Click: ver las cuentas que tienen este titulo">
           <td><strong>${t.ticker}</strong></td>
           <td><span class="pill ${tipoPill[t.tipo]||'pill-gray'}" style="font-size:10px">${t.tipo.replace(/_/g,' ')}</span></td>
           <td class="td-muted">${t.alloc.grupo  || '—'}</td>
@@ -3065,8 +3041,12 @@ function actualizarAllocations() {
           <td class="td-num"><strong>${fmtPct(pctNeto)}</strong></td>
           <td class="td-num" style="color:var(--text2)">${fmtPct(pctBruto)}</td>
           <td class="td-num">$${fmt(t.valor)}</td>
-          <td class="td-num">${t.cuentas.size}</td>
-        </tr>`;
+          <td class="td-num">${t.cuentas.size} ▾</td>
+        </tr>
+        <tr id="${detId}" style="display:none;background:var(--bg3)"><td colspan="8" style="padding:8px 16px 12px">
+          <table style="width:100%;font-size:11px"><thead><tr><th style="text-align:left">Cuenta / Cliente</th><th style="text-align:right">Cantidad</th><th style="text-align:right">Valor $</th><th style="text-align:right">% neto cuenta</th><th style="text-align:right">% bruto cuenta</th></tr></thead>
+          <tbody>${filasDet}</tbody></table>
+        </td></tr>`;
       }).join('')
     : `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text3)">Sin datos para este filtro</td></tr>`;
 
@@ -3567,7 +3547,7 @@ return {
   renderRendimiento, toggleRendGrupo, setRendAlyc,
   applyDashFilters, clearDashFilter, clearDashFilters,
   actualizarDashboard,
-  populateAllocFilters, toggleAllocDrop, allocCheckChange, allocTodosChange, allocSearchFilter, clearAllocFilters, setAllocView, actualizarAllocations,
+  populateAllocFilters, toggleAllocDrop, allocCheckChange, allocTodosChange, allocSearchFilter, clearAllocFilters, setAllocView, actualizarAllocations, toggleAllocDet,
   renderModelo, calcularRotacion,
   cargarOrdenesYResultado,
   exportarCarteraGlobal, exportarOperaciones, exportarResultado,

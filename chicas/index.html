@@ -530,7 +530,7 @@ th:hover { background:var(--bg4); }
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js"></script>
+<script src="../shared/sibra-maestros.js?v=20260828"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -720,6 +720,16 @@ function _claveOp(tipo, alyc, comitente, ticker, cantidad) {
 }
 
 async function registrarOperacion(tipo, alyc, comitente, ticker, cantidad, precioSpot) {
+  // ── CANDADO OPERATIVO (Juan, 2026-08-27): sin perfil y sin composición de
+  // cartera no se opera — mismo criterio compartido que rotaciones y
+  // príncipe (SibraMaestros.clienteOperable). El alta va en /market/maestros/.
+  const _cli=findCliente(comitente,alyc);
+  const _op=SibraMaestros.clienteOperable(_cli);
+  if(!_op.ok){
+    log(`⛔ ${comitente} (${alyc}): ${_op.motivo} — no se registra la operación`,'log-err');
+    alert(`No se puede operar el comitente ${comitente} (${alyc}):\n\n${_op.motivo}\n\nCargalo en el módulo Maestros y volvé a intentar.`);
+    return;
+  }
   const clave=_claveOp(tipo, alyc, comitente, ticker, cantidad);
   // (1) misma operacion todavia escribiendose
   if(_opsEnVuelo.has(clave)) {
@@ -881,7 +891,10 @@ async function cargarClientesDrive() {
   try {
     setStatus('clientes','loading','Leyendo base...');
     const rows=await SibraMaestros.clientes();
-    clientes=rows.map(c=>({cc:String(c.cc),cliente:c.cliente,alyc:c.alyc}));
+    // perfil + composición viajan con el cliente: los usa el candado
+    // operativo (clienteOperable) — sin ellos bloqueaba a todos por error.
+    clientes=rows.map(c=>({cc:String(c.cc),cliente:c.cliente,alyc:c.alyc,
+      perfil:c.perfil,lp:c.lp,mp:c.mp,cp:c.cp,cash:c.cash,palanca:c.palanca}));
     $('sc-clientes-name').textContent='market_clientes · Supabase';
     setStatus('clientes','ok',`${clientes.length} clientes`);
     log(`✅ Clientes: ${clientes.length} (Supabase)`,'log-ok');
