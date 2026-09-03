@@ -11,7 +11,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828e"></script>
+<script src="../shared/sibra-maestros.js?v=20260828f"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <style>
@@ -367,6 +367,12 @@ tr:hover td { background: var(--bg3); }
 .pill-amber { background: rgba(245,158,11,0.12); color: #fbbf24; }
 .pill-blue { background: rgba(59,130,246,0.12); color: #60a5fa; }
 .pill-gray { background: rgba(255,255,255,0.06); color: var(--text2); }
+/* Un color por tipo de instrumento, para leerlos de un vistazo (Juan 2026-08-28) */
+.pill-violet { background: rgba(167,139,250,0.14); color: #a78bfa; }  /* CEDEAR */
+.pill-teal   { background: rgba(45,212,191,0.14);  color: #2dd4bf; }  /* ETF */
+.pill-pink   { background: rgba(244,114,182,0.14); color: #f472b6; }  /* FCI */
+.pill-orange { background: rgba(251,146,60,0.14);  color: #fb923c; }  /* ON */
+.pill-cyan   { background: rgba(34,211,238,0.14);  color: #22d3ee; }  /* ADR */
 
 /* ── DASHBOARD ── */
 .kpi-row {
@@ -2152,6 +2158,22 @@ function clasificarTicker(ticker, alloc) {
 // 2026-08-28) — así un bono no clasificado igual se escala bien, y un cedear
 // nunca se divide por 100 (el bug de GOOGL a 94 pesos).
 const PANELES_x100 = new Set(['arg_bonds','arg_notes','arg_corp']);
+
+// Un color por tipo de instrumento (Juan 2026-08-28): definido UNA vez, lo
+// usan todas las tablas — antes estaba copiado tres veces con FCI/CEDEAR/ETF
+// todos azules, imposible distinguirlos.
+const TIPO_PILL = {
+  ACCION_ARG: 'pill-green',
+  CEDEAR:     'pill-violet',
+  ETF:        'pill-teal',
+  FCI:        'pill-pink',
+  RENTA_FIJA: 'pill-amber',
+  ON:         'pill-orange',
+  ADR:        'pill-cyan',
+  CASH_ARS:   'pill-gray',
+  CASH_USD:   'pill-gray',
+  DESCONOCIDO:'pill-red',   // rojo: sin clasificar, salta a la vista
+};
 function getPrecioUnitario(ticker, tipo) {
   if (tipo === 'CASH_ARS') return 1;
   if (tipo === 'CASH_USD') return S.mep || 1;
@@ -2728,11 +2750,7 @@ function renderCartaTabla(data) {
     $('cartNCli').textContent = clientes;
   }
 
-  const tipoPill = {
-    ACCION_ARG:'pill-green', CEDEAR:'pill-blue', RENTA_FIJA:'pill-amber',
-    ON:'pill-amber', ADR:'pill-blue', ETF:'pill-blue', FCI:'pill-blue',
-    CASH_ARS:'pill-gray', CASH_USD:'pill-gray', DESCONOCIDO:'pill-gray'
-  };
+  const tipoPill = TIPO_PILL;
 
   $('tbCartaGlobal').innerHTML = data.map(p => `<tr>
     <td><span class="pill pill-gray" style="font-size:10px;">${p.alyc}</span></td>
@@ -3051,9 +3069,7 @@ function actualizarAllocations() {
            (!f.subtipo.size  || f.subtipo.has(a.subtipo));
   });
 
-  const tipoPill = { ACCION_ARG:'pill-green', CEDEAR:'pill-blue', RENTA_FIJA:'pill-amber',
-    ON:'pill-amber', ADR:'pill-blue', ETF:'pill-blue', FCI:'pill-blue',
-    CASH_ARS:'pill-gray', CASH_USD:'pill-gray', DESCONOCIDO:'pill-gray' };
+  const tipoPill = TIPO_PILL;
 
   // ── Cuentas: % neto y % bruto siempre sobre el total de ESA cuenta (no sobre el filtro) ──
   // Misma clave alyc|comitente que cuentaInfo, por la misma razón (comitente
@@ -3451,7 +3467,7 @@ function renderRotacion() {
         const pct = totalCart > 0 ? p.valor/totalCart*100 : 0;
         return `<tr>
           <td><strong>${p.ticker}</strong></td>
-          <td><span class="pill pill-gray" style="font-size:10px;">${p.tipo.replace('_',' ')}</span></td>
+          <td><span class="pill ${TIPO_PILL[p.tipo]||'pill-gray'}" style="font-size:10px;">${p.tipo.replace('_',' ')}</span></td>
           <td class="td-num">${fmt(p.tenencia,0)}</td>
           <td class="td-num">$${fmt(p.precioUnit,2)}</td>
           <td class="td-num">$${fmt(p.valor)}</td>
