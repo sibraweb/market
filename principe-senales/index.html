@@ -9,7 +9,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828c"></script>
+<script src="../shared/sibra-maestros.js?v=20260828d"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -1075,10 +1075,13 @@ const Senales = {
   // 1500 tickers, imposible de encontrar uno. El datalist se arma UNA vez
   // (Senales.datalistHTML) y todas las filas lo referencian por id.
   selectTicker(tipo, i, actual){
+    // SOLO onchange (al salir del campo o elegir del datalist): con oninput
+    // se re-renderizaba la tabla en CADA tecla y el foco se perdía letra a
+    // letra (Juan, 2026-08-28). Ahora escribís todo tranquilo y recién al
+    // confirmar se guarda.
     return `<input class="input-field" list="senales-tickers" style="text-transform:uppercase"
               value="${actual||""}" placeholder="escribí para filtrar…"
-              onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)"
-              oninput="Senales.setCampo('${tipo}',${i},'ticker',this.value)">`;
+              onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)">`;
   },
   datalistHTML(){
     const papeles = S.papeles||[];
