@@ -11,7 +11,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828b"></script>
+<script src="../shared/sibra-maestros.js?v=20260828e"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <style>
@@ -2063,6 +2063,35 @@ function resolveTickerInIndex(ticker) {
   return null;
 }
 
+// Devuelve {price, panel} — el panel es la FUENTE del precio y con eso se
+// decide la escala (÷100), no con la clasificación (Juan, 2026-08-28: "si ya
+// sabés de dónde traés el precio, ahí le ponés la regla del /100"). Más
+// robusto: un ticker mal/no clasificado igual se escala bien según su panel.
+function getPriceInfo(ticker, tipo) {
+  const resolved = resolveTickerInIndex(ticker);
+  if (!resolved) return null;
+  const entries = S.priceIndex[resolved];
+  if (!entries || entries.length === 0) return null;
+  const priority = {
+    ACCION_ARG: ['arg_stocks','arg_cedears','usa_adrs','usa_stocks'],
+    CEDEAR:     ['arg_cedears','usa_stocks','usa_adrs'],
+    ETF:        ['arg_cedears','usa_stocks'],
+    RENTA_FIJA: ['arg_bonds','arg_notes','arg_corp'],
+    ON:         ['arg_corp','arg_bonds','arg_notes'],
+    ADR:        ['usa_adrs','usa_stocks','arg_stocks'],
+    USA:        ['usa_stocks','usa_adrs'],
+    DESCONOCIDO: ['arg_cedears','arg_stocks','arg_bonds','arg_corp','arg_notes'],
+  };
+  const prio = priority[tipo];
+  if (prio) {
+    for (const p of prio) {
+      const found = entries.find(e => e.panel === p);
+      if (found) return { price: found.price, panel: found.panel };
+    }
+  }
+  return { price: entries[0].price, panel: entries[0].panel };
+}
+
 function getPrice(ticker, tipo) {
   const resolved = resolveTickerInIndex(ticker);
   if (!resolved) return null;
@@ -2118,17 +2147,17 @@ function clasificarTicker(ticker, alloc) {
   return 'DESCONOCIDO';
 }
 
+// Paneles de RENTA FIJA de data912: cotizan POR 100 NOMINALES → ÷100. La
+// escala se decide por el PANEL de origen, no por la clasificación (Juan,
+// 2026-08-28) — así un bono no clasificado igual se escala bien, y un cedear
+// nunca se divide por 100 (el bug de GOOGL a 94 pesos).
+const PANELES_x100 = new Set(['arg_bonds','arg_notes','arg_corp']);
 function getPrecioUnitario(ticker, tipo) {
   if (tipo === 'CASH_ARS') return 1;
   if (tipo === 'CASH_USD') return S.mep || 1;
-  const raw = getPrice(ticker, tipo);
-  if (raw === null) return null;
-  if (['ACCION_ARG','CEDEAR','ETF','ADR','FCI'].includes(tipo)) return raw;
-  // ÷100 SOLO para renta fija (cotiza por 100 nominales). DESCONOCIDO salió de
-  // acá (Juan, 2026-08-28: cedear de GOOGL daba 94 pesos = 9400/100): un ticker
-  // sin clasificar se asume acción/cedear, precio tal cual.
-  if (['RENTA_FIJA','ON'].includes(tipo)) return raw / 100;
-  return raw;
+  const info = getPriceInfo(ticker, tipo);
+  if (info === null) return null;
+  return PANELES_x100.has(info.panel) ? info.price / 100 : info.price;
 }
 
 // Precio unitario de IEB (verde) — el homebroker publica el spot a Supabase y
