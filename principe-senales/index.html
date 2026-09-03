@@ -9,7 +9,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828"></script>
+<script src="../shared/sibra-maestros.js?v=20260828c"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -1070,16 +1070,30 @@ const Senales = {
   // tipeo. Si el ticker ya guardado no está en la clasificación (papel
   // dado de baja, o la clasificación no cargó), se agrega igual como
   // opción extra para no perder el dato existente.
+  // Input libre + <datalist> compartido: filtra solo mientras se escribe y la
+  // lista se va achicando (Juan, 2026-08-28). Antes era un <select> plano de
+  // 1500 tickers, imposible de encontrar uno. El datalist se arma UNA vez
+  // (Senales.datalistHTML) y todas las filas lo referencian por id.
   selectTicker(tipo, i, actual){
+    return `<input class="input-field" list="senales-tickers" style="text-transform:uppercase"
+              value="${actual||""}" placeholder="escribí para filtrar…"
+              onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)"
+              oninput="Senales.setCampo('${tipo}',${i},'ticker',this.value)">`;
+  },
+  datalistHTML(){
     const papeles = S.papeles||[];
-    const faltaActual = actual && !papeles.includes(actual);
-    const opciones = [
-      `<option value="">-- elegir --</option>`,
-      faltaActual?`<option value="${actual}" selected>${actual} (no está en clasificación)</option>`:"",
-      ...papeles.map(t=>`<option value="${t}" ${t===actual?"selected":""}>${t}</option>`),
-    ].join("");
-    return `<select class="input-field" style="text-transform:uppercase"
-              onchange="Senales.setCampo('${tipo}',${i},'ticker',this.value)">${opciones}</select>`;
+    return `<datalist id="senales-tickers">${papeles.map(t=>`<option value="${t}">`).join("")}</datalist>`;
+  },
+  // Los tickers de Maestros están CACHEADOS (SibraMaestros): si se agregan con
+  // el príncipe abierto, no aparecen hasta invalidar (Juan, 2026-08-28). Este
+  // botón fuerza la relectura de la base.
+  async recargarPapeles(){
+    try{
+      SibraMaestros.invalidate();
+      await Datos.cargarPapeles();
+      UI.renderSenales();
+      toast(`${(S.papeles||[]).length} tickers recargados de Maestros`);
+    }catch(e){ toast("No se pudo recargar: "+e.message,"error"); }
   },
 
   renderTabla(tipo){
@@ -1587,6 +1601,11 @@ const UI = {
   renderSenales(){
     const hayCambios = !!Senales.borrador;
     $("pane-senales").innerHTML = `
+    ${Senales.datalistHTML()}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="font-size:11px;color:var(--text3)">${(S.papeles||[]).length} tickers en la lista</span>
+      <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="Senales.recargarPapeles()">↻ Recargar tickers de Maestros</button>
+    </div>
     <div class="grid2">
       <div>
         <div class="section-title">Señales de venta</div>
