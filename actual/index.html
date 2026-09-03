@@ -11,7 +11,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828"></script>
+<script src="../shared/sibra-maestros.js?v=20260828b"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <style>
@@ -917,6 +917,11 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
       <button class="btn-primary w-full" id="btnCargarDrive" style="padding:13px; font-size:14px; justify-content:center;" onclick="App.loadData(true)">
         ↻ Cargar cartera desde la base
       </button>
+
+      <!-- Semáforo de fuente del precio (Juan 2026-08-28): 🟢 IEB · 🟡 data912 ·
+           🔴 valor de tenencias (parseo, no es precio actual). Se repinta con
+           cada refresco de spot. -->
+      <div id="fuenteResumen" style="display:none; margin-top:12px; font-size:12px; color:var(--text2); line-height:1.9;"></div>
 
       <!-- Log -->
       <div id="processLog" class="process-log" style="display:none; margin-top:12px;"></div>
@@ -2119,6 +2124,43 @@ function getPrecioUnitario(ticker, tipo) {
   return raw;
 }
 
+// Precio unitario de IEB (verde) — el homebroker publica el spot a Supabase y
+// se carga en S.preciosIEB { TICKER: precio_ya_escalado }. HOY el puente no
+// existe todavía (el front publicado no alcanza el server local: va por
+// Supabase), así que esto devuelve null y la fuente arranca en amarillo; el
+// día que la tabla exista, se prende el verde solo, sin tocar el resto.
+function precioIEB(ticker) {
+  const m = S.preciosIEB;
+  if (!m) return null;
+  const v = m[String(ticker).toUpperCase()];
+  return (v != null && v !== 0) ? v : null;
+}
+
+// La cadena de fuentes con su color: IEB > data912 > tenencia (parseo).
+// Devuelve { precioUnit, valor, fuente:'ieb'|'data912'|'tenencia'|'cash' }.
+function precioConFuente(p, tipo) {
+  if (tipo === 'CASH_ARS' || tipo === 'CASH_USD') {
+    const pu = getPrecioUnitario(p.ticker, tipo) ?? 0;
+    return { precioUnit: pu, valor: p.tenencia * pu, fuente: 'cash' };
+  }
+  const pIeb = precioIEB(p.ticker);
+  if (pIeb != null) return { precioUnit: pIeb, valor: p.tenencia * pIeb, fuente: 'ieb' };
+  const pD912 = getPrecioUnitario(p.ticker, tipo);
+  if (pD912 != null && pD912 !== 0) return { precioUnit: pD912, valor: p.tenencia * pD912, fuente: 'data912' };
+  // Último recurso: el valor del parseo (foto de la última sync). Avisado.
+  if (p.valorBase != null) {
+    const pu = p.precioUnit || (p.tenencia ? p.valorBase / p.tenencia : 0);
+    return { precioUnit: pu, valor: p.valorBase, fuente: 'tenencia' };
+  }
+  return { precioUnit: 0, valor: 0, fuente: 'tenencia' };
+}
+const FUENTE_DOT = {
+  ieb:      '<span title="IEB (homebroker) — precio en vivo" style="color:#22c55e">●</span>',
+  data912:  '<span title="data912 — spot público" style="color:#f59e0b">●</span>',
+  tenencia: '<span title="⚠ valor del parseo (última sincronización, NO es precio actual)" style="color:#e10600">●</span>',
+  cash:     '',
+};
+
 // Parsea números con formato monetario argentino: "$6.382.856,50" → 6382856.50
 // También maneja números normales, strings vacíos y valores de Excel
 function parseNum(val) {
@@ -2333,6 +2375,24 @@ function renderCartaGlobal() {
   });
 
   cartDataCache = allValuada;
+  // Semáforo de fuentes: cuántos papeles a IEB / data912 / valor de tenencias.
+  // El rojo es el que importa avisar: son los que NO están a precio actual.
+  const cuenta = { ieb: 0, data912: 0, tenencia: 0, cash: 0 };
+  const sinSpot = [];
+  allValuada.forEach(p => {
+    cuenta[p.fuentePrecio] = (cuenta[p.fuentePrecio] || 0) + 1;
+    if (p.fuentePrecio === 'tenencia' && p.tenencia) sinSpot.push(p.ticker);
+  });
+  const fr = $('fuenteResumen');
+  if (fr) {
+    const uniqRojo = [...new Set(sinSpot)];
+    fr.style.display = '';
+    fr.innerHTML =
+      `${FUENTE_DOT.ieb} IEB <b>${cuenta.ieb}</b> &nbsp; ` +
+      `${FUENTE_DOT.data912} data912 <b>${cuenta.data912}</b> &nbsp; ` +
+      `${FUENTE_DOT.tenencia} tenencias <b>${cuenta.tenencia}</b>` +
+      (uniqRojo.length ? `<div style="color:#e10600;font-size:11px;margin-top:4px">⚠ sin precio actual (valor del último parseo): ${uniqRojo.slice(0,12).join(', ')}${uniqRojo.length>12?` y ${uniqRojo.length-12} más`:''}</div>` : '');
+  }
   filtrarCartera();
 }
 
@@ -2962,11 +3022,13 @@ function actualizarAllocations() {
   // ── Cuentas: % neto y % bruto siempre sobre el total de ESA cuenta (no sobre el filtro) ──
   // Misma clave alyc|comitente que cuentaInfo, por la misma razón (comitente
   // repetido entre brokers).
+  // Valor al SPOT con la misma cadena IEB>data912>tenencia que valuarCartera
+  // (Juan 2026-08-28): un solo lugar (precioConFuente) para no divergir.
   const cuentasMap = {};
   posFiltered.forEach(p => {
     const key = `${p.alyc}|${p.comitente}`;
     const tipo = clasificarTicker(p.ticker, S.allocation[p.ticker]);
-    const val  = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
+    const val  = precioConFuente(p, tipo).valor;
     if (!cuentasMap[key])
       cuentasMap[key] = { comitente: p.comitente, alyc: p.alyc, cliente: cuentaInfo[key]?.cliente || p.comitente, valor: 0, tickers: new Set(), filas: [] };
     cuentasMap[key].valor += val;
@@ -3009,7 +3071,7 @@ function actualizarAllocations() {
   posFiltered.forEach(p => {
     const alloc = S.allocation[p.ticker] || {};
     const tipo  = clasificarTicker(p.ticker, alloc);
-    const val   = p.tenencia * (getPrecioUnitario(p.ticker, tipo) ?? 0);
+    const val   = precioConFuente(p, tipo).valor;
     if (!tickersMap[p.ticker])
       tickersMap[p.ticker] = { ticker: p.ticker, tipo, alloc, valor: 0, cuentas: new Set(), filas: [] };
     tickersMap[p.ticker].valor += val;
@@ -3073,11 +3135,15 @@ function valuarCartera(pos) {
   return Object.values(mapa).map(p => {
     const alloc = S.allocation[p.ticker];
     const tipo = clasificarTicker(p.ticker, alloc) || p.tipoBase || '';
-    // Valor autoritativo: el que ya trae la base (market_value_ars del broker).
-    // Sólo si falta cae al cálculo tenencia × precio de data912.
-    const precioUnit = (p.precioUnit != null && p.precioUnit !== 0) ? p.precioUnit : (getPrecioUnitario(p.ticker, tipo) ?? 0);
-    const valor = (p.valorBase != null) ? p.valorBase : p.tenencia * precioUnit;
-    return { ...p, alloc: alloc || {}, tipo, precioUnit, valor };
+    // VALUAR A SPOT con SEMÁFORO DE FUENTE (Juan, 2026-08-28):
+    //   🟢 IEB      precio del homebroker (via Supabase — ver precioIEB)
+    //   🟡 data912  spot público, cae acá si IEB no lo tiene
+    //   🔴 tenencia el valor del PARSEO (foto de la última sync) — último
+    //              recurso, avisado: NO es precio actual.
+    // Nunca CERO: si data912 no cotiza el ticker (ON, letras, FCI) cae al
+    // valor del broker en vez de valuar en cero.
+    const r = precioConFuente(p, tipo);
+    return { ...p, alloc: alloc || {}, tipo, precioUnit: r.precioUnit, valor: r.valor, fuentePrecio: r.fuente };
   }).filter(p => p.valor !== 0);
 }
 
@@ -3530,7 +3596,9 @@ function init() {
       await fetchPrices(true);
       try { renderCartaGlobal(); } catch (e) { console.warn('[auto-refresh] renderCartaGlobal:', e); }
       try { actualizarDashboard(); } catch (e) { console.warn('[auto-refresh] actualizarDashboard:', e); }
-    });
+      // Allocations también se revalúa al spot en cada ciclo (Juan 2026-08-28).
+      try { if (S.tab === 'allocations') actualizarAllocations(); } catch (e) { console.warn('[auto-refresh] allocations:', e); }
+    }, 10);   // cada 10s: es dato que se pierde, no importa perderlo
     console.log('[SIBRA] App inicializado OK. driveAuth:', typeof driveAuth);
   } catch(e) {
     console.error('[SIBRA] Error en init():', e);
