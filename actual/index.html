@@ -2076,6 +2076,10 @@ function getPrice(ticker, tipo) {
     ON:         ['arg_corp','arg_bonds','arg_notes'],
     ADR:        ['usa_adrs','usa_stocks','arg_stocks'],
     USA:        ['usa_stocks','usa_adrs'],
+    // Sin clasificar: se asume acción/cedear ARGENTINO (en $), NO el precio
+    // en dólares de usa_stocks — los 42 sin clasificar son cedears/acciones
+    // (GOOGL, MELI, NVDA...), no papeles USD (Juan, 2026-08-28).
+    DESCONOCIDO: ['arg_cedears','arg_stocks','arg_bonds','arg_corp','arg_notes'],
   };
   const prio = priority[tipo];
   if (prio) {
@@ -2120,7 +2124,10 @@ function getPrecioUnitario(ticker, tipo) {
   const raw = getPrice(ticker, tipo);
   if (raw === null) return null;
   if (['ACCION_ARG','CEDEAR','ETF','ADR','FCI'].includes(tipo)) return raw;
-  if (['RENTA_FIJA','ON','DESCONOCIDO'].includes(tipo)) return raw / 100;
+  // ÷100 SOLO para renta fija (cotiza por 100 nominales). DESCONOCIDO salió de
+  // acá (Juan, 2026-08-28: cedear de GOOGL daba 94 pesos = 9400/100): un ticker
+  // sin clasificar se asume acción/cedear, precio tal cual.
+  if (['RENTA_FIJA','ON'].includes(tipo)) return raw / 100;
   return raw;
 }
 
