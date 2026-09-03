@@ -530,7 +530,7 @@ th:hover { background:var(--bg4); }
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828"></script>
+<script src="../shared/sibra-maestros.js?v=20260828c"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <script src="../shared/sibra-guardar-archivo.js"></script>
@@ -554,6 +554,7 @@ let posiciones  = [];
 let clientes    = [];
 let caucionesPorCuenta = {}; // `${alyc}|${normCC(cc)}` -> {ars, usd} (TOMADORA vigente)
 let priceIndex  = {};
+let papelesMaestro = [];  // tickers de Maestros (market_papeles) para el buscador de compra
 let operHoy     = [];   // operaciones del día leídas de Sheets
 let ventaTickers   = new Set();
 let compraTicker   = null;
@@ -903,9 +904,22 @@ async function cargarClientesDrive() {
   } catch(e){ setStatus('clientes','error','Error: '+e.message); log(`❌ Clientes: ${e.message}`,'log-err'); }
 }
 
+// Tickers de Maestros (market_papeles) para el buscador de COMPRA: así un
+// ticker recién clasificado aparece aunque data912 todavía no lo cotice
+// (Juan, 2026-08-28: "que aparezca en todos"). No-fatal.
+async function cargarPapelesMaestro(fresh=false) {
+  try {
+    if (fresh) SibraMaestros.invalidate();
+    const rows = await SibraMaestros.papeles();
+    papelesMaestro = rows.map(r=>String(r.simbolo).trim().toUpperCase()).filter(Boolean);
+    log(`✅ Papeles Maestros: ${papelesMaestro.length}`,'log-ok');
+  } catch(e){ console.warn('[chicas] papeles maestro:', e.message); }
+}
+
 async function cargarTodo() {
   $('processLog').innerHTML=''; $('processLog').style.display='block';
   log('☁ Cargando todo...');
+  await cargarPapelesMaestro();
   await Promise.all([
     cargarTenenciasSheet(true),
     cargarClientesDrive(),
@@ -1203,18 +1217,22 @@ function renderVentaChips() {
 // ═══════════════════════════════════════════
 function onCompraTickerInput(){ openCompraTickerDrop(); }
 function openCompraTickerDrop() {
-  const q=$('compraTickerInput').value;
-  // Para compras mostramos todos los tickers del índice de precios
-  const items=Object.entries(priceIndex)
-    .filter(([t])=>!q||t.includes(q.toUpperCase()))
-    .sort((a,b)=>b[1].length-a[1].length)
+  const q=$('compraTickerInput').value.toUpperCase();
+  // UNIVERSO DE COMPRA = data912 (con precio) ∪ Maestros (Juan 2026-08-28: un
+  // ticker recién clasificado aparece aunque data912 aún no lo cotice). Los
+  // que tienen precio van primero; los de solo-Maestros se marcan "sin precio".
+  const universo = new Set([...Object.keys(priceIndex), ...papelesMaestro]);
+  const items = [...universo]
+    .filter(t=>!q||t.includes(q))
+    .map(t=>({ t, price: priceIndex[t]?priceIndex[t][0].price:null, n: priceIndex[t]?priceIndex[t].length:0 }))
+    .sort((a,b)=>(b.price!=null)-(a.price!=null) || b.n-a.n || a.t.localeCompare(b.t))
     .slice(0,30);
   const drop=$('compraTickerDrop');
   if(!items.length){drop.classList.remove('open');return;}
-  drop.innerHTML=items.map(([t,entries])=>`
+  drop.innerHTML=items.map(({t,price})=>`
     <div class="ticker-item" onclick="seleccionarCompraTicker('${t}')">
       <span class="ti-sym">${t}</span>
-      <span class="ti-count">$${fmt(entries[0].price,2)}</span>
+      <span class="ti-count">${price!=null?'$'+fmt(price,2):'sin precio'}</span>
     </div>`).join('');
   drop.classList.add('open');
 }
