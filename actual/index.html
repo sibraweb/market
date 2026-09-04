@@ -11,7 +11,7 @@
 <script src="../shared/sibra-auth.js"></script>
 <script src="../shared/sibra-cache.js"></script>
 <script src="../shared/sibra-brokers-data.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828f"></script>
+<script src="../shared/sibra-maestros.js?v=20260828h"></script>
 <script src="../shared/sibra-autorefresh.js"></script>
 <script src="../shared/sibra-discrepancia.js"></script>
 <style>
@@ -978,6 +978,11 @@ hr.sep { border:none; border-top:1px solid var(--border); margin:16px 0; }
       </div>
       <button class="btn-secondary" style="font-size:11px; padding:7px 14px;" onclick="App.limpiarFiltroGlobal()">✕ Limpiar todo</button>
       <button class="btn-secondary" style="font-size:11px; padding:7px 14px;" onclick="App.exportarCarteraGlobal()">↓ Excel</button>
+      <!-- Actualizar SPOT a mano (Juan 2026-08-28): refresca precios y repinta,
+           sin recargar tenencias (eso es el botón "Cargar", más pesado). El
+           auto-refresco ya corre cada 10s; esto es el "dame ahora". -->
+      <button class="btn-primary" id="btnSpot" style="font-size:11px; padding:7px 14px;" onclick="App.actualizarSpot()">↻ Actualizar precios</button>
+      <span id="spotSello" style="font-size:10px; color:var(--text3); align-self:center;"></span>
     </div>
     <!-- Chips de selección activos -->
     <div id="globalChipsRow" style="display:none; margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -1994,6 +1999,23 @@ async function cargarMaestros(fresh = false) {
 //  DATA 912 — Precios
 // ══════════════════════════════════════════
 const DATA912 = 'https://data912.com/live';
+
+// Actualizar SPOT a mano: baja precios + MEP y repinta todo (cartera,
+// dashboard, allocations) sin recargar tenencias (Juan 2026-08-28).
+async function actualizarSpot() {
+  const b = document.getElementById('btnSpot');
+  if (b) { b.disabled = true; b.textContent = 'Actualizando…'; }
+  try {
+    await fetchPrices(true);
+    await fetchMEP();
+    try { renderCartaGlobal(); } catch (e) { console.warn('[spot] cartera:', e); }
+    try { actualizarDashboard(); } catch (e) { console.warn('[spot] dash:', e); }
+    try { if (S.tab === 'allocations') actualizarAllocations(); } catch (e) { console.warn('[spot] alloc:', e); }
+    const s = document.getElementById('spotSello');
+    if (s) s.textContent = 'spot ' + new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch (e) { console.error('[spot]', e); }
+  finally { if (b) { b.disabled = false; b.textContent = '↻ Actualizar precios'; } }
+}
 
 // `silencioso`: para el refresco automático cada 20s (ver
 // shared/sibra-autorefresh.js) — hace el mismo trabajo pero sin escribir
@@ -3661,7 +3683,7 @@ function init() {
 return {
   driveAuth, driveRevoke, driveBrowse, closeDrivePicker, confirmDrivePick,
   cargarMaestros, cargarTodoDesdeDrive,
-  procesarArchivos, loadData, fetchPrices, fetchMEP,
+  procesarArchivos, loadData, fetchPrices, fetchMEP, actualizarSpot,
   onAlycChange, onClienteChange, onRotAlycChange,
   filtrarCartera, limpiarFiltroGlobal, aplicarFiltroGlobal, sortCartera,
   renderRendimiento, toggleRendGrupo, setRendAlyc,
