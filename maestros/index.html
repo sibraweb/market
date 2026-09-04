@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="../shared/sibra-cache.js"></script>
-<script src="../shared/sibra-maestros.js?v=20260828"></script>
+<script src="../shared/sibra-maestros.js?v=20260828g"></script>
 <style>
 :root {
   --red: #E10600; --red-dark: #B00500; --red-light: #ff3330;
@@ -83,6 +83,7 @@ tr.dirty td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
   <div class="nav-tab active" data-tab="papeles">Papeles (clasificación)</div>
   <div class="nav-tab" data-tab="modelos">Carteras objetivo</div>
   <div class="nav-tab" data-tab="clientes">Clientes</div>
+  <div class="nav-tab" data-tab="sync">Sincronizar mercado</div>
 </nav>
 <main class="main">
 
@@ -137,6 +138,25 @@ tr.dirty td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
     <span class="pill" id="cntClientes">—</span>
   </div>
   <div class="table-wrap" id="tblClientes"></div>
+</section>
+
+<section class="panel" id="panel-sync">
+  <div class="hero"><h1>Sincronizar con el mercado</h1>
+  <p>Baja el universo de tickers de <b>data912</b> y lo cruza con tu clasificación (<code>market_papeles</code>) y con lo que tenés en cartera. <b>Agrega</b> lo que falte con el tipo pre-sugerido; <b>marca</b> lo que quedó viejo — pero NO borra solo (tu clasificación tiene sector/país/escala que data912 no trae).</p></div>
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="App.syncBajar()">⬇ Bajar universo de data912</button>
+    <div class="spacer"></div>
+    <span class="pill" id="cntSync">—</span>
+  </div>
+
+  <!-- A) EN CARTERA SIN CLASIFICAR — lo urgente -->
+  <div id="syncFaltan" style="margin-top:16px"></div>
+
+  <!-- B) EN EL MERCADO, NO EN TU LISTA — informativo -->
+  <div id="syncNuevos" style="margin-top:20px"></div>
+
+  <!-- C) EN TU LISTA, YA NO EN EL MERCADO — candidatos a borrar -->
+  <div id="syncObsoletos" style="margin-top:20px"></div>
 </section>
 
 <div id="log" class="log"></div>
@@ -460,7 +480,123 @@ const App = (() => {
     if (S.dirty.papeles || S.dirty.modelos || S.dirty.clientes) { e.preventDefault(); e.returnValue = ''; }
   });
 
-  return { init, toggleSesion, recargar, render, agregarFila, borrarFila, guardar, importar, exportar };
+  // ══════════════════════════════════════════════════════════════════
+  //  SINCRONIZAR CON EL MERCADO (Juan, 2026-08-28)
+  //  data912 (universo) × market_papeles (mi lista) × tenencias (lo que tengo)
+  //  Agrega lo que falta con tipo pre-sugerido; marca obsoletos SIN borrar.
+  // ══════════════════════════════════════════════════════════════════
+  const DATA912 = 'https://data912.com/live';
+  // panel de data912 -> (grupo, subgrupo, pais) sugeridos
+  const PANEL_MAP = {
+    arg_stocks:  ['RV','GENERAL','ARG'],
+    arg_cedears: ['RV','CEDEAR','USA'],
+    arg_bonds:   ['RF','BONOS',''],
+    arg_notes:   ['RF','LETRAS',''],
+    arg_corp:    ['RF','ON',''],
+  };
+  const EFECTIVO_SYNC = new Set(['PESOS','USD_MEP','USD_DIVISA','USD_CABLE','CASH_ARS','CASH_USD',
+    'USD D','USD C','$','DOLAR EXT.','DOLARUSA','USD 7000']);
+  let SYNC = { universo: {}, faltan: [], nuevos: [], obsoletos: [] };
+
+  async function syncBajar() {
+    try {
+      $('cntSync').textContent = 'bajando data912…';
+      // 1) universo data912: {SIMBOLO: [grupo,subgrupo,pais]}
+      const universo = {};
+      for (const [panel, meta] of Object.entries(PANEL_MAP)) {
+        try {
+          const d = await (await fetch(`${DATA912}/${panel}`)).json();
+          for (const it of d) {
+            const s = String(it.symbol||'').trim().toUpperCase();
+            if (s && !universo[s]) universo[s] = meta;
+          }
+        } catch (e) { log(`⚠ data912 ${panel}: ${e.message}`, 'log-warn'); }
+      }
+      // 2) mi lista y mi cartera
+      const clasificados = new Set(S.papeles.map(r => String(r.simbolo).trim().toUpperCase()));
+      // tenencias: tabla brokers_tenencias (requiere sesión, igual que el resto)
+      let tenidos = new Set();
+      try {
+        const t = await SibraMaestros.selectAll('brokers_tenencias', 'ticker');
+        tenidos = new Set(t.map(r => String(r.ticker||'').trim().toUpperCase()).filter(Boolean));
+      } catch (e) { log(`⚠ no pude leer tenencias: ${e.message}`, 'log-warn'); }
+
+      // A) EN CARTERA SIN CLASIFICAR (urgente)
+      SYNC.faltan = [...tenidos].filter(t => t && !clasificados.has(t) && !EFECTIVO_SYNC.has(t))
+        .sort().map(t => ({ simbolo:t, meta: universo[t]||null, enData912: !!universo[t] }));
+      // B) EN EL MERCADO, NO EN MI LISTA (informativo) — excluyo los de A
+      const faltanSet = new Set(SYNC.faltan.map(x=>x.simbolo));
+      SYNC.nuevos = Object.keys(universo).filter(s => !clasificados.has(s) && !faltanSet.has(s))
+        .sort().map(s => ({ simbolo:s, meta: universo[s] }));
+      // C) EN MI LISTA, YA NO EN EL MERCADO NI EN CARTERA (candidatos a borrar)
+      SYNC.obsoletos = [...clasificados].filter(s => !universo[s] && !tenidos.has(s) && !EFECTIVO_SYNC.has(s))
+        .sort();
+      SYNC.universo = universo;
+      $('cntSync').textContent = `${Object.keys(universo).length} en mercado · ${SYNC.faltan.length} en cartera sin clasificar`;
+      renderSync();
+      log(`✅ Sync: mercado ${Object.keys(universo).length} · faltan ${SYNC.faltan.length} · nuevos ${SYNC.nuevos.length} · obsoletos ${SYNC.obsoletos.length}`, 'log-ok');
+    } catch (e) { log(`❌ Sync: ${e.message}`, 'log-err'); }
+  }
+
+  function _filaSug(x) {
+    const m = x.meta;
+    const sug = m ? `${m[1]} <span class="muted">(${m[0]}${m[2]?' · '+m[2]:''})</span>` : '<span class="log-warn">sin dato en data912</span>';
+    return `<tr><td><b>${x.simbolo}</b></td><td>${sug}</td></tr>`;
+  }
+  function renderSync() {
+    // A) urgente
+    $('syncFaltan').innerHTML = `
+      <div style="font-weight:700;color:#ff6b6b;margin-bottom:6px">🔴 En cartera SIN clasificar — ${SYNC.faltan.length}</div>
+      <p class="muted" style="margin:-2px 0 8px">Estos se valúan mal hasta clasificarlos (el bug del cedear a 94 pesos). Se agregan con el tipo que sugiere data912.</p>
+      ${SYNC.faltan.length ? `<div class="table-wrap"><table><thead><tr><th>SÍMBOLO</th><th>TIPO SUGERIDO</th></tr></thead>
+        <tbody>${SYNC.faltan.map(_filaSug).join('')}</tbody></table></div>
+        <button class="btn btn-primary" style="margin-top:8px" onclick="App.syncAgregar('faltan')">➕ Agregar los ${SYNC.faltan.filter(x=>x.meta).length} clasificables a la base</button>`
+        : '<p class="muted">Nada pendiente — todo lo que tenés está clasificado. 👍</p>'}`;
+    // B) informativo (colapsado, puede ser enorme)
+    $('syncNuevos').innerHTML = `
+      <div style="font-weight:700;margin-bottom:6px">🟡 En el mercado, no en tu lista — ${SYNC.nuevos.length}</div>
+      <p class="muted" style="margin:-2px 0 8px">No urgente: son papeles que existen pero no tenés. Agregalos solo si los vas a usar.</p>
+      <button class="btn btn-secondary" onclick="App.syncAgregar('nuevos')">➕ Agregar TODO el universo a la base (${SYNC.nuevos.length})</button>`;
+    // C) obsoletos
+    $('syncObsoletos').innerHTML = `
+      <div style="font-weight:700;margin-bottom:6px">🗑 En tu lista, ya no en el mercado — ${SYNC.obsoletos.length}</div>
+      <p class="muted" style="margin:-2px 0 8px">Candidatos a borrar (no cotizan y no los tenés). Revisá antes: FCI y papeles viejos pueden ser legítimos. El borrado es manual, por eso NO se hace solo.</p>
+      ${SYNC.obsoletos.length ? `<div class="table-wrap" style="max-height:220px;overflow:auto"><table><tbody>${
+        SYNC.obsoletos.map(s=>`<tr><td><b>${s}</b></td><td style="text-align:right"><button class="btn btn-secondary" onclick="App.syncBorrar('${s}')">✕ borrar</button></td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted">Ninguno.</p>'}`;
+  }
+
+  async function syncAgregar(cual) {
+    try {
+      const lista = cual === 'faltan' ? SYNC.faltan.filter(x=>x.meta) : SYNC.nuevos;
+      if (!lista.length) { log('Nada para agregar', 'log-warn'); return; }
+      if (!confirm(`Agregar ${lista.length} papeles a market_papeles (sin pisar los existentes). ¿Confirmar?`)) return;
+      // INSERT on conflict do nothing vía PostgREST: Prefer resolution=ignore-duplicates
+      const rows = lista.map(x => ({ simbolo:x.simbolo, grupo:x.meta[0], subgrupo:x.meta[1], pais:x.meta[2]||'' }));
+      for (let i=0;i<rows.length;i+=500) {
+        await SibraMaestros.rest('market_papeles', { method:'POST', body: rows.slice(i,i+500),
+          headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' } });
+      }
+      SibraMaestros.invalidate();
+      log(`✅ ${rows.length} papeles agregados`, 'log-ok');
+      await recargar('papeles', true);
+      await syncBajar();
+    } catch (e) { log(`❌ Agregar: ${e.message}`, 'log-err'); }
+  }
+
+  async function syncBorrar(simbolo) {
+    try {
+      if (!confirm(`Borrar ${simbolo} de market_papeles. Se pierde su clasificación (sector/país/escala). ¿Seguro?`)) return;
+      await SibraMaestros.rest(`market_papeles?simbolo=eq.${encodeURIComponent(simbolo)}`, { method:'DELETE' });
+      SibraMaestros.invalidate();
+      log(`🗑 ${simbolo} borrado`, 'log-ok');
+      await recargar('papeles', true);
+      await syncBajar();
+    } catch (e) { log(`❌ Borrar ${simbolo}: ${e.message}`, 'log-err'); }
+  }
+
+  return { init, toggleSesion, recargar, render, agregarFila, borrarFila, guardar, importar, exportar,
+           syncBajar, syncAgregar, syncBorrar };
 })();
 document.addEventListener('DOMContentLoaded', App.init);
 </script>
